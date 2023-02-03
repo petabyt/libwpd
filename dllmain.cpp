@@ -29,11 +29,10 @@ LPCWSTR client_name;
 #define MAX_DEVICES 10
 int verbose = 1;
 
-#define LOG(...) if (verbose) printf(__VA_ARGS__)
+#define LOG(...) if (verbose) printf("WPD: " __VA_ARGS__)
 
 struct WpdStruct {
 	IPortableDevice* pDevice;
-	LPWSTR last_context_cookie;
 	IPortableDeviceValues* spResults;
 	IPortableDeviceValues* pDevValues;
 };
@@ -196,6 +195,19 @@ int wpd_open_device(struct WpdStruct* wpd, PWSTR deviceId) {
 }
 
 extern "C" __declspec(dllexport)
+int wpd_close_device(struct WpdStruct* wpd) {
+	HRESULT hr = wpd->pDevice->Close();
+	hr |= wpd->pDevValues->Clear();
+	hr |= wpd->spResults->Clear();
+
+	if (FAILED(hr)) {
+		LOG("Failed to close the device");
+	}
+
+	return hr;
+}
+
+extern "C" __declspec(dllexport)
 int wpd_get_device_type(struct WpdStruct* wpd) {
 	IPortableDeviceContent* content;
 	HRESULT hr = wpd->pDevice->Content(&content);
@@ -280,15 +292,6 @@ int wpd_recieve_do_command(struct WpdStruct* wpd, struct PtpCommand* cmd) {
 
 	hr = wpd->pDevice->SendCommand(0, wpd->pDevValues, &wpd->spResults);
 
-	if (SUCCEEDED(hr)) {
-		LOG("Success send\n");
-		wpd->spResults->GetStringValue(WPD_PROPERTY_MTP_EXT_TRANSFER_CONTEXT, &wpd->last_context_cookie);
-		return 0;
-	}
-	else {
-		return hr;
-	}
-
 	return 0;
 }
 
@@ -367,5 +370,75 @@ int wpd_recieve_do_data(struct WpdStruct* wpd, struct PtpCommand* cmd, BYTE * bu
 	// Requires it for some reason. We'll just copy it to where it should be.
 	memcpy(buffer, bufferOut, cbBytesRead);
 
+	CoTaskMemFree(pwszContext);
+
 	return cbBytesRead;
+}
+
+extern "C" __declspec(dllexport)
+int wpd_send_do_command(struct WpdStruct* wpd, struct PtpCommand* cmd, int length) {
+	wpd->spResults = NULL;
+	HRESULT hr = wpd_prep_command(
+		wpd,
+		WPD_COMMAND_MTP_EXT_EXECUTE_COMMAND_WITH_DATA_TO_WRITE,
+		cmd
+	);
+
+	hr = wpd->pDevValues->SetUnsignedIntegerValue(WPD_PROPERTY_MTP_EXT_TRANSFER_TOTAL_DATA_SIZE, length);
+	if (FAILED(hr)) {
+		LOG("Failed to set data size\n");
+		return -1;
+	}
+
+	hr = wpd->pDevice->SendCommand(0, wpd->pDevValues, &wpd->spResults);
+	if (FAILED(hr)) {
+		LOG("Failed to send command\n");
+		return -1;
+	}
+
+	return 0;
+}
+
+extern "C" __declspec(dllexport)
+int wpd_send_do_data(struct WpdStruct* wpd, struct PtpCommand* cmd, BYTE *buffer, int length) {
+	LPWSTR pwszContext = NULL;
+	wpd->spResults->GetStringValue(WPD_PROPERTY_MTP_EXT_TRANSFER_CONTEXT, &pwszContext);
+
+	wpd->pDevValues->Clear();
+
+	HRESULT hr = wpd->pDevValues->SetGuidValue(WPD_PROPERTY_COMMON_COMMAND_CATEGORY,
+		WPD_COMMAND_MTP_EXT_WRITE_DATA.fmtid);
+
+	hr = wpd->pDevValues->SetUnsignedIntegerValue(WPD_PROPERTY_COMMON_COMMAND_ID,
+			WPD_COMMAND_MTP_EXT_WRITE_DATA.pid);
+	hr |= wpd->pDevValues->SetStringValue(WPD_PROPERTY_MTP_EXT_TRANSFER_CONTEXT, pwszContext);
+	hr |= wpd->pDevValues->SetUnsignedIntegerValue(WPD_PROPERTY_MTP_EXT_TRANSFER_NUM_BYTES_TO_WRITE, length);
+	hr |= wpd->pDevValues->SetBufferValue(WPD_PROPERTY_MTP_EXT_TRANSFER_DATA, buffer, length);
+	if (FAILED(hr)) {
+		LOG("Failed to set data properties\n");
+	}
+
+	hr = wpd->pDevice->SendCommand(0, wpd->pDevValues, &wpd->spResults);
+	if (SUCCEEDED(hr)) {
+		hr = wpd->spResults->GetErrorValue(WPD_PROPERTY_COMMON_HRESULT, &hr);
+		if (SUCCEEDED(hr)) {
+			LOG("Successfully sent data\n");
+		} else {
+			LOG("Failed to send data\n");
+			return -1;
+		}
+	} else {
+		LOG("Failed to send data\n");
+		return -1;
+	}
+
+	DWORD cbBytesWritten = 0;
+	hr = wpd->spResults->GetUnsignedIntegerValue(WPD_PROPERTY_MTP_EXT_TRANSFER_NUM_BYTES_WRITTEN,
+		&cbBytesWritten);
+
+	LOG("Sent %d bytes\n", cbBytesWritten);
+
+	CoTaskMemFree(pwszContext);
+
+	return cbBytesWritten;
 }

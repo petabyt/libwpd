@@ -295,13 +295,49 @@ int wpd_recieve_do_command(struct WpdStruct* wpd, struct PtpCommand* cmd) {
 	return 0;
 }
 
+int send_finished_command(struct WpdStruct* wpd, struct PtpCommand* cmd, LPWSTR pwszContext) {
+	// Send the required "completion" command
+	wpd->spResults->Release();
+	wpd->pDevValues->Clear();
+
+	HRESULT hr = wpd->pDevValues->SetGuidValue(WPD_PROPERTY_COMMON_COMMAND_CATEGORY,
+		WPD_COMMAND_MTP_EXT_END_DATA_TRANSFER.fmtid);
+	hr |= wpd->pDevValues->SetUnsignedIntegerValue(WPD_PROPERTY_COMMON_COMMAND_ID,
+		WPD_COMMAND_MTP_EXT_END_DATA_TRANSFER.pid);
+	hr |= wpd->pDevValues->SetStringValue(WPD_PROPERTY_MTP_EXT_TRANSFER_CONTEXT, pwszContext);
+
+	hr |= wpd->pDevice->SendCommand(0, wpd->pDevValues, &wpd->spResults);
+	if (SUCCEEDED(hr)) {
+		LOG("Sent the completion command.\n");
+	} else {
+		LOG("Failed to send the completion command\n");
+		return -1;
+	}
+
+	wpd->spResults->GetErrorValue(WPD_PROPERTY_COMMON_HRESULT, &hr);
+	if (FAILED(hr)) {
+		LOG("Completion command failed\n");
+		return -1;
+	}
+
+	DWORD dwResponseCode = 0;
+	hr = wpd->spResults->GetUnsignedIntegerValue(WPD_PROPERTY_MTP_EXT_RESPONSE_CODE, &dwResponseCode);
+	if (FAILED(hr)) {
+		LOG("Failed to get response code %X\n", hr);
+		dwResponseCode = 0x2001;
+	}
+	printf("Return code: %X\n", dwResponseCode);
+	cmd->code = dwResponseCode;
+	return 0;
+}
+
 extern "C" __declspec(dllexport)
 int wpd_recieve_do_data(struct WpdStruct* wpd, struct PtpCommand* cmd, BYTE * buffer, int length) {
 	ULONG cbOptimalDataSize = 0;
 	HRESULT hr = wpd->spResults->GetUnsignedIntegerValue(WPD_PROPERTY_MTP_EXT_TRANSFER_TOTAL_DATA_SIZE,
 		&cbOptimalDataSize);
 
-	printf("Optimal data size: %d\n", cbOptimalDataSize);
+	printf("Optimal data size: %d, max %d\n", cbOptimalDataSize, length);
 
 	LPWSTR pwszContext = NULL;
 	wpd->spResults->GetStringValue(WPD_PROPERTY_MTP_EXT_TRANSFER_CONTEXT, &pwszContext);
@@ -335,40 +371,16 @@ int wpd_recieve_do_data(struct WpdStruct* wpd, struct PtpCommand* cmd, BYTE * bu
 		return -1;
 	}
 
-	// Send the required "completion" command
-	wpd->spResults->Release();
-	wpd->pDevValues->Clear();
-	hr = wpd->pDevValues->SetGuidValue(WPD_PROPERTY_COMMON_COMMAND_CATEGORY,
-		WPD_COMMAND_MTP_EXT_END_DATA_TRANSFER.fmtid);
-	hr |= wpd->pDevValues->SetUnsignedIntegerValue(WPD_PROPERTY_COMMON_COMMAND_ID,
-		WPD_COMMAND_MTP_EXT_END_DATA_TRANSFER.pid);
-	hr |= wpd->pDevValues->SetStringValue(WPD_PROPERTY_MTP_EXT_TRANSFER_CONTEXT, pwszContext);
-	hr |= wpd->pDevice->SendCommand(0, wpd->pDevValues, &wpd->spResults);
-	if (SUCCEEDED(hr)) {
-		LOG("Sent the completion command.\n");
-	}
-	else {
-		LOG("Failed to send the completion command\n");
-		return -1;
-	}
-
-	DWORD dwResponseCode = 0;
-	hr = wpd->spResults->GetUnsignedIntegerValue(WPD_PROPERTY_MTP_EXT_RESPONSE_CODE, &dwResponseCode);
-	if (hr) {
-		LOG("Failed to get response code %X\n", hr);
-		return -1;
-	}
-	printf("Return code: %X\n", dwResponseCode);
-	cmd->code = dwResponseCode;
-
-	//IPortableDevicePropVariantCollection *params;
-	//wpd->spResults->GetIPortableDevicePropVariantCollectionValue(WPD_PROPERTY_MTP_EXT_RESPONSE_PARAMS, &params);
-
 	LOG("Read %d bytes\n", cbBytesRead);
 
 	// Win32 quirk note: the data is not actually transferred into `buffer`. Makes no sense, but Windows
 	// Requires it for some reason. We'll just copy it to where it should be.
 	memcpy(buffer, bufferOut, cbBytesRead);
+
+	//IPortableDevicePropVariantCollection *params;
+	//wpd->spResults->GetIPortableDevicePropVariantCollectionValue(WPD_PROPERTY_MTP_EXT_RESPONSE_PARAMS, &params);
+
+	send_finished_command(wpd, cmd, pwszContext);
 
 	CoTaskMemFree(pwszContext);
 
@@ -383,6 +395,10 @@ int wpd_send_do_command(struct WpdStruct* wpd, struct PtpCommand* cmd, int lengt
 		WPD_COMMAND_MTP_EXT_EXECUTE_COMMAND_WITH_DATA_TO_WRITE,
 		cmd
 	);
+	if (FAILED(hr)) {
+		LOG("Failed to prep command\n");
+		return -1;
+	}
 
 	hr = wpd->pDevValues->SetUnsignedIntegerValue(WPD_PROPERTY_MTP_EXT_TRANSFER_TOTAL_DATA_SIZE, length);
 	if (FAILED(hr)) {
@@ -408,14 +424,18 @@ int wpd_send_do_data(struct WpdStruct* wpd, struct PtpCommand* cmd, BYTE *buffer
 
 	HRESULT hr = wpd->pDevValues->SetGuidValue(WPD_PROPERTY_COMMON_COMMAND_CATEGORY,
 		WPD_COMMAND_MTP_EXT_WRITE_DATA.fmtid);
-
+	if (FAILED(hr)) { LOG("FAILED X\n"); return -1; }
 	hr = wpd->pDevValues->SetUnsignedIntegerValue(WPD_PROPERTY_COMMON_COMMAND_ID,
 			WPD_COMMAND_MTP_EXT_WRITE_DATA.pid);
-	hr |= wpd->pDevValues->SetStringValue(WPD_PROPERTY_MTP_EXT_TRANSFER_CONTEXT, pwszContext);
-	hr |= wpd->pDevValues->SetUnsignedIntegerValue(WPD_PROPERTY_MTP_EXT_TRANSFER_NUM_BYTES_TO_WRITE, length);
-	hr |= wpd->pDevValues->SetBufferValue(WPD_PROPERTY_MTP_EXT_TRANSFER_DATA, buffer, length);
+	if (FAILED(hr)) { LOG("FAILED X\n"); return -1; }
+	hr = wpd->pDevValues->SetStringValue(WPD_PROPERTY_MTP_EXT_TRANSFER_CONTEXT, pwszContext);
+	if (FAILED(hr)) { LOG("FAILED X\n"); return -1; }
+	hr = wpd->pDevValues->SetUnsignedIntegerValue(WPD_PROPERTY_MTP_EXT_TRANSFER_NUM_BYTES_TO_WRITE, length);
+	if (FAILED(hr)) { LOG("FAILED X\n"); return -1; }
+	hr = wpd->pDevValues->SetBufferValue(WPD_PROPERTY_MTP_EXT_TRANSFER_DATA, buffer, length);
 	if (FAILED(hr)) {
 		LOG("Failed to set data properties\n");
+		return -1;
 	}
 
 	hr = wpd->pDevice->SendCommand(0, wpd->pDevValues, &wpd->spResults);
@@ -437,6 +457,8 @@ int wpd_send_do_data(struct WpdStruct* wpd, struct PtpCommand* cmd, BYTE *buffer
 		&cbBytesWritten);
 
 	LOG("Sent %d bytes\n", cbBytesWritten);
+
+	send_finished_command(wpd, cmd, pwszContext);
 
 	CoTaskMemFree(pwszContext);
 

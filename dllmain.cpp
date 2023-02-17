@@ -326,7 +326,7 @@ int send_finished_command(struct WpdStruct* wpd, struct PtpCommand* cmd, LPWSTR 
 		LOG("Failed to get response code %X\n", hr);
 		dwResponseCode = 0x2001;
 	}
-	printf("Return code: %X\n", dwResponseCode);
+	LOG("Return code: %X\n", dwResponseCode);
 	cmd->code = dwResponseCode;
 	return 0;
 }
@@ -337,7 +337,7 @@ int wpd_recieve_do_data(struct WpdStruct* wpd, struct PtpCommand* cmd, BYTE * bu
 	HRESULT hr = wpd->spResults->GetUnsignedIntegerValue(WPD_PROPERTY_MTP_EXT_TRANSFER_TOTAL_DATA_SIZE,
 		&cbOptimalDataSize);
 
-	printf("Optimal data size: %d, max %d\n", cbOptimalDataSize, length);
+	LOG("Optimal data size: %d, max %d\n", cbOptimalDataSize, length);
 
 	LPWSTR pwszContext = NULL;
 	wpd->spResults->GetStringValue(WPD_PROPERTY_MTP_EXT_TRANSFER_CONTEXT, &pwszContext);

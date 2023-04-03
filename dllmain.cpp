@@ -55,8 +55,9 @@ BOOL APIENTRY DllMain(HMODULE hModule,
 
 extern "C" __declspec(dllexport)
 int wpd_init(int v, LPCWSTR name) {
-	if (CoInitialize(nullptr)) {
-		LOG("Couldn't coinitialize\n");
+	HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+	if (hr != S_OK) {
+		LOG("Couldn't coinitialize hr: %d err:%d\n", hr, GetLastError());
 		return 1;
 	}
 
@@ -68,6 +69,10 @@ int wpd_init(int v, LPCWSTR name) {
 
 extern "C" __declspec(dllexport)
 PWSTR * wpd_get_devices(struct WpdStruct* wpd, DWORD * numDevices) {
+	wpd->pDevice = NULL;
+	wpd->pDevValues = NULL;
+	wpd->spResults = NULL;
+
 	IPortableDeviceManager* pPortableDeviceManager = nullptr;
 
 	HRESULT hr = CoCreateInstance(CLSID_PortableDeviceManager,
@@ -125,30 +130,30 @@ int wpd_open_device(struct WpdStruct* wpd, PWSTR deviceId) {
 
 	if (FAILED(pClientInformation->SetStringValue(WPD_CLIENT_NAME, client_name))) {
 		LOG("Failed to set WPD_CLIENT_NAME: %d\n", GetLastError());
-		return hr;
+		return 1;
 	}
 
 	if (FAILED(pClientInformation->SetUnsignedIntegerValue(WPD_CLIENT_MAJOR_VERSION, CLIENT_MAJOR_VER)))
 	{
 		LOG("Failed to set WPD_CLIENT_MAJOR_VERSION: %d\n", GetLastError());
-		return hr;
+		return 1;
 	}
 
 	if (FAILED(pClientInformation->SetUnsignedIntegerValue(WPD_CLIENT_MINOR_VERSION, CLIENT_MINOR_VER)))
 	{
 		LOG("Failed to set WPD_CLIENT_MINOR_VERSION: %d\n", GetLastError());
-		return hr;
+		return 1;
 	}
 
 	if (FAILED(pClientInformation->SetUnsignedIntegerValue(WPD_CLIENT_REVISION, CLIENT_REVISION)))
 	{
 		LOG("Failed to set WPD_CLIENT_REVISION: %d\n", GetLastError());
-		return hr;
+		return 1;
 	}
 
 	if (FAILED(pClientInformation->SetUnsignedIntegerValue(WPD_CLIENT_SECURITY_QUALITY_OF_SERVICE, SECURITY_IMPERSONATION))) {
 		LOG("Failed to set WPD_CLIENT_SECURITY_QUALITY_OF_SERVICE: %d\n", GetLastError());
-		return hr;
+		return 1;
 	}
 
 	hr = CoCreateInstance(
@@ -160,7 +165,7 @@ int wpd_open_device(struct WpdStruct* wpd, PWSTR deviceId) {
 	);
 	if (hr) {
 		LOG("Failed to create portable device\n");
-		return hr;
+		return 1;
 	}
 
 	hr = wpd->pDevice->Open(wszPnPDeviceID, pClientInformation);
@@ -174,7 +179,7 @@ int wpd_open_device(struct WpdStruct* wpd, PWSTR deviceId) {
 
 	if (!SUCCEEDED(hr)) {
 		LOG("Failed to open device %X\n", hr);
-		return hr;
+		return 1;
 	}
 
 	// Get properties
@@ -196,9 +201,10 @@ int wpd_open_device(struct WpdStruct* wpd, PWSTR deviceId) {
 
 extern "C" __declspec(dllexport)
 int wpd_close_device(struct WpdStruct* wpd) {
-	HRESULT hr = wpd->pDevice->Close();
-	hr |= wpd->pDevValues->Clear();
-	hr |= wpd->spResults->Clear();
+	HRESULT hr;
+	if (wpd->pDevice != NULL) hr = wpd->pDevice->Close();
+	if (wpd->pDevValues != NULL) hr |= wpd->pDevValues->Clear();
+	if (wpd->spResults != NULL) hr |= wpd->spResults->Clear();
 
 	if (FAILED(hr)) {
 		LOG("Failed to close the device");
@@ -224,10 +230,6 @@ int wpd_get_device_type(struct WpdStruct* wpd) {
 	LOG("Device type: %d\n", ti);
 	return (int)ti;
 }
-
-//int wpd_send_command_data(char* buffer, int code, int* params);
-//int wpd_get_command_data(char* buffer, int code, int* params);
-//int wpd_get_command_data(char* buffer, int code, int* params);
 
 extern "C" __declspec(dllexport)
 int wpd_prep_command(struct WpdStruct* wpd, PROPERTYKEY type, struct PtpCommand* cmd) {

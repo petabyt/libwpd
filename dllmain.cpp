@@ -1,5 +1,6 @@
 #include "pch.h"
 #include <conio.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
@@ -10,10 +11,16 @@
 #include <PortableDeviceApi.h>
 #include <PortableDevice.h>
 #include <WpdMtpExtensions.h>
-#pragma comment(lib,"PortableDeviceGUIDs.lib")
 
 #include <codecvt>
 #include <locale>
+
+#pragma comment(lib,"PortableDeviceGUIDs.lib")
+
+#define CLIENT_MAJOR_VER	1
+#define CLIENT_MINOR_VER	0
+#define CLIENT_REVISION		0
+#define MAX_DEVICES			10
 
 struct PtpCommand {
 	int code;
@@ -22,34 +29,34 @@ struct PtpCommand {
 	int data_length;
 };
 
-LPCWSTR client_name;
-#define CLIENT_MAJOR_VER	1
-#define CLIENT_MINOR_VER	0
-#define CLIENT_REVISION		0
-#define MAX_DEVICES 10
-int verbose = 1;
+static int verbose = 1;
+static LPCWSTR client_name;
 
-#define LOG(...) if (verbose) printf("WPD: " __VA_ARGS__)
-
+#pragma pack(push, 1)
 struct WpdStruct {
 	IPortableDevice* pDevice;
 	IPortableDeviceValues* spResults;
 	IPortableDeviceValues* pDevValues;
 };
+#pragma pack(pop)
 
-BOOL APIENTRY DllMain(HMODULE hModule,
-	DWORD  ul_reason_for_call,
-	LPVOID lpReserved
-)
-{
-	switch (ul_reason_for_call)
-	{
+static void mylog(const char* format, ...) {
+	if (verbose == 0) return;
+	va_list args;
+	va_start(args, format);
+	vprintf(format, args);
+	va_end(args);
+}
+
+BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReserved) {
+	switch (ul_reason_for_call) {
 	case DLL_PROCESS_ATTACH:
 	case DLL_THREAD_ATTACH:
 	case DLL_THREAD_DETACH:
 	case DLL_PROCESS_DETACH:
 		break;
 	}
+	
 	return TRUE;
 }
 
@@ -57,7 +64,7 @@ extern "C" __declspec(dllexport)
 int wpd_init(int v, LPCWSTR name) {
 	HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
 	if (hr != S_OK) {
-		LOG("Couldn't coinitialize hr: %d err:%d\n", hr, GetLastError());
+		mylog("Couldn't coinitialize hr=%d err=%d\n", hr, GetLastError());
 		return 1;
 	}
 
@@ -80,23 +87,23 @@ PWSTR * wpd_get_devices(struct WpdStruct* wpd, DWORD * numDevices) {
 		CLSCTX_INPROC_SERVER,
 		IID_PPV_ARGS(&pPortableDeviceManager));
 	if (!SUCCEEDED(hr)) {
-		LOG("Error %d\n", GetLastError());
+		mylog("Error %d\n", GetLastError());
 		return NULL;
 	}
 
 	hr = pPortableDeviceManager->GetDevices(NULL, numDevices);
 	if (!SUCCEEDED(hr)) {
-		LOG("Error getting devices length\n");
+		mylog("Error getting devices length\n");
 		return NULL;
 	}
 
-	LOG("Detected %d devices.\n", *numDevices);
+	mylog("Detected %d devices.\n", (*numDevices));
 
-	PWSTR* deviceIDs = (PWSTR*)malloc(sizeof(PWSTR) * *numDevices);
+	PWSTR* deviceIDs = (PWSTR*)malloc(sizeof(PWSTR) * (*numDevices));
 
 	hr = pPortableDeviceManager->GetDevices(deviceIDs, numDevices);
 	if (!SUCCEEDED(hr)) {
-		LOG("Error getting devices\n");
+		mylog("Error getting devices\n");
 		return NULL;
 	}
 
@@ -124,35 +131,35 @@ int wpd_open_device(struct WpdStruct* wpd, PWSTR deviceId) {
 		(VOID**)&pClientInformation
 	);
 	if (hr) {
-		LOG("Failed to create portable devices");
+		mylog("Failed to create portable devices");
 		return hr;
 	}
 
 	if (FAILED(pClientInformation->SetStringValue(WPD_CLIENT_NAME, client_name))) {
-		LOG("Failed to set WPD_CLIENT_NAME: %d\n", GetLastError());
+		mylog("Failed to set WPD_CLIENT_NAME: %d\n", GetLastError());
 		return 1;
 	}
 
 	if (FAILED(pClientInformation->SetUnsignedIntegerValue(WPD_CLIENT_MAJOR_VERSION, CLIENT_MAJOR_VER)))
 	{
-		LOG("Failed to set WPD_CLIENT_MAJOR_VERSION: %d\n", GetLastError());
+		mylog("Failed to set WPD_CLIENT_MAJOR_VERSION: %d\n", GetLastError());
 		return 1;
 	}
 
 	if (FAILED(pClientInformation->SetUnsignedIntegerValue(WPD_CLIENT_MINOR_VERSION, CLIENT_MINOR_VER)))
 	{
-		LOG("Failed to set WPD_CLIENT_MINOR_VERSION: %d\n", GetLastError());
+		mylog("Failed to set WPD_CLIENT_MINOR_VERSION: %d\n", GetLastError());
 		return 1;
 	}
 
 	if (FAILED(pClientInformation->SetUnsignedIntegerValue(WPD_CLIENT_REVISION, CLIENT_REVISION)))
 	{
-		LOG("Failed to set WPD_CLIENT_REVISION: %d\n", GetLastError());
+		mylog("Failed to set WPD_CLIENT_REVISION: %d\n", GetLastError());
 		return 1;
 	}
 
 	if (FAILED(pClientInformation->SetUnsignedIntegerValue(WPD_CLIENT_SECURITY_QUALITY_OF_SERVICE, SECURITY_IMPERSONATION))) {
-		LOG("Failed to set WPD_CLIENT_SECURITY_QUALITY_OF_SERVICE: %d\n", GetLastError());
+		mylog("Failed to set WPD_CLIENT_SECURITY_QUALITY_OF_SERVICE: %d\n", GetLastError());
 		return 1;
 	}
 
@@ -164,7 +171,7 @@ int wpd_open_device(struct WpdStruct* wpd, PWSTR deviceId) {
 		(VOID**)&wpd->pDevice
 	);
 	if (hr) {
-		LOG("Failed to create portable device\n");
+		mylog("Failed to create portable device\n");
 		return 1;
 	}
 
@@ -178,7 +185,7 @@ int wpd_open_device(struct WpdStruct* wpd, PWSTR deviceId) {
 	}
 
 	if (!SUCCEEDED(hr)) {
-		LOG("Failed to open device %X\n", hr);
+		mylog("Failed to open device %X\n", hr);
 		return 1;
 	}
 
@@ -194,7 +201,7 @@ int wpd_open_device(struct WpdStruct* wpd, PWSTR deviceId) {
 	// TODO:
 	HANDLE handle = CreateEvent(nullptr, false, false, nullptr);
 
-	LOG("Opened device %ls\n", wszPnPDeviceID);
+	mylog("Opened device %ls\n", wszPnPDeviceID);
 
 	return 0;
 }
@@ -207,7 +214,7 @@ int wpd_close_device(struct WpdStruct* wpd) {
 	if (wpd->spResults != NULL) hr |= wpd->spResults->Clear();
 
 	if (FAILED(hr)) {
-		LOG("Failed to close the device");
+		mylog("Failed to close the device");
 	}
 
 	return hr;
@@ -217,17 +224,17 @@ extern "C" __declspec(dllexport)
 int wpd_get_device_type(struct WpdStruct* wpd) {
 	IPortableDeviceContent* content;
 	HRESULT hr = wpd->pDevice->Content(&content);
-	if (hr) { LOG("content fail\n"); return -1; }
+	if (hr) { mylog("content fail\n"); return -1; }
 	IPortableDeviceProperties* properties;
 	hr = content->Properties(&properties);
-	if (hr) { LOG("properties fail\n"); return -1; }
+	if (hr) { mylog("properties fail\n"); return -1; }
 	IPortableDeviceKeyCollection* keys = NULL;
 	IPortableDeviceValues* values = NULL;
 	hr = properties->GetValues(WPD_DEVICE_OBJECT_ID, keys, &values);
-	if (hr) { LOG("getvalues fail\n"); return -1; }
+	if (hr) { mylog("getvalues fail\n"); return -1; }
 	ULONG ti = 0;
 	values->GetUnsignedIntegerValue(WPD_DEVICE_TYPE, &ti);
-	LOG("Device type: %d\n", ti);
+	mylog("Device type: %d\n", ti);
 	return (int)ti;
 }
 
@@ -245,7 +252,7 @@ int wpd_prep_command(struct WpdStruct* wpd, PROPERTYKEY type, struct PtpCommand*
 	hr |= wpd->pDevValues->SetUnsignedIntegerValue(WPD_PROPERTY_COMMON_COMMAND_ID, type.pid);
 	hr |= wpd->pDevValues->SetUnsignedIntegerValue(WPD_PROPERTY_MTP_EXT_OPERATION_CODE, (ULONG)cmd->code);
 	if (hr) {
-		LOG("Error setting command info\n");
+		mylog("Error setting command info\n");
 		return hr;
 	}
 
@@ -257,7 +264,7 @@ int wpd_prep_command(struct WpdStruct* wpd, PROPERTYKEY type, struct PtpCommand*
 		IID_PPV_ARGS(&spMtpParams)
 	);
 	if (hr) {
-		LOG("Error creating prop variant collection\n");
+		mylog("Error creating prop variant collection\n");
 		return hr;
 	}
 
@@ -271,10 +278,10 @@ int wpd_prep_command(struct WpdStruct* wpd, PROPERTYKEY type, struct PtpCommand*
 	hr = wpd->pDevValues->SetIPortableDevicePropVariantCollectionValue(
 		WPD_PROPERTY_MTP_EXT_OPERATION_PARAMS, spMtpParams);
 	if (SUCCEEDED(hr)) {
-		LOG("Set parameters\n");
+		mylog("Set parameters\n");
 	}
 	else {
-		LOG("Error setting parameters\n");
+		mylog("Error setting parameters\n");
 		return hr;
 	}
 
@@ -310,25 +317,25 @@ int send_finished_command(struct WpdStruct* wpd, struct PtpCommand* cmd, LPWSTR 
 
 	hr |= wpd->pDevice->SendCommand(0, wpd->pDevValues, &wpd->spResults);
 	if (SUCCEEDED(hr)) {
-		LOG("Sent the completion command.\n");
+		mylog("Sent the completion command.\n");
 	} else {
-		LOG("Failed to send the completion command\n");
+		mylog("Failed to send the completion command\n");
 		return -1;
 	}
 
 	wpd->spResults->GetErrorValue(WPD_PROPERTY_COMMON_HRESULT, &hr);
 	if (FAILED(hr)) {
-		LOG("Completion command failed\n");
+		mylog("Completion command failed\n");
 		return -1;
 	}
 
 	DWORD dwResponseCode = 0;
 	hr = wpd->spResults->GetUnsignedIntegerValue(WPD_PROPERTY_MTP_EXT_RESPONSE_CODE, &dwResponseCode);
 	if (FAILED(hr)) {
-		LOG("Failed to get response code %X\n", hr);
+		mylog("Failed to get response code %X\n", hr);
 		dwResponseCode = 0x2001;
 	}
-	LOG("Return code: %X\n", dwResponseCode);
+	mylog("Return code: %X\n", dwResponseCode);
 	cmd->code = dwResponseCode;
 	return 0;
 }
@@ -339,7 +346,7 @@ int wpd_recieve_do_data(struct WpdStruct* wpd, struct PtpCommand* cmd, BYTE * bu
 	HRESULT hr = wpd->spResults->GetUnsignedIntegerValue(WPD_PROPERTY_MTP_EXT_TRANSFER_TOTAL_DATA_SIZE,
 		&cbOptimalDataSize);
 
-	LOG("Optimal data size: %d, max %d\n", cbOptimalDataSize, length);
+	mylog("Optimal data size: %d, max %d\n", cbOptimalDataSize, length);
 
 	LPWSTR pwszContext = NULL;
 	wpd->spResults->GetStringValue(WPD_PROPERTY_MTP_EXT_TRANSFER_CONTEXT, &pwszContext);
@@ -355,13 +362,13 @@ int wpd_recieve_do_data(struct WpdStruct* wpd, struct PtpCommand* cmd, BYTE * bu
 
 	hr = wpd->pDevice->SendCommand(0, wpd->pDevValues, &wpd->spResults);
 	if (!SUCCEEDED(hr)) {
-		LOG("Failed to recieve data");
+		mylog("Failed to recieve data");
 		return -1;
 	}
 
 	wpd->spResults->GetErrorValue(WPD_PROPERTY_COMMON_HRESULT, &hr);
 	if (hr) {
-		LOG("Failed to finish command\n");
+		mylog("Failed to finish command\n");
 		return -1;
 	}
 
@@ -369,11 +376,11 @@ int wpd_recieve_do_data(struct WpdStruct* wpd, struct PtpCommand* cmd, BYTE * bu
 	ULONG cbBytesRead = 0;
 	hr = wpd->spResults->GetBufferValue(WPD_PROPERTY_MTP_EXT_TRANSFER_DATA, &bufferOut, &cbBytesRead);
 	if (hr) {
-		LOG("Failed to get data\n");
+		mylog("Failed to get data\n");
 		return -1;
 	}
 
-	LOG("Read %d bytes\n", cbBytesRead);
+	mylog("Read %d bytes\n", cbBytesRead);
 
 	// Win32 quirk note: the data is not actually transferred into `buffer`. Makes no sense, but Windows
 	// Requires it for some reason. We'll just copy it to where it should be.
@@ -398,19 +405,19 @@ int wpd_send_do_command(struct WpdStruct* wpd, struct PtpCommand* cmd, int lengt
 		cmd
 	);
 	if (FAILED(hr)) {
-		LOG("Failed to prep command\n");
+		mylog("Failed to prep command\n");
 		return -1;
 	}
 
 	hr = wpd->pDevValues->SetUnsignedIntegerValue(WPD_PROPERTY_MTP_EXT_TRANSFER_TOTAL_DATA_SIZE, length);
 	if (FAILED(hr)) {
-		LOG("Failed to set data size\n");
+		mylog("Failed to set data size\n");
 		return -1;
 	}
 
 	hr = wpd->pDevice->SendCommand(0, wpd->pDevValues, &wpd->spResults);
 	if (FAILED(hr)) {
-		LOG("Failed to send command\n");
+		mylog("Failed to send command\n");
 		return -1;
 	}
 
@@ -426,17 +433,17 @@ int wpd_send_do_data(struct WpdStruct* wpd, struct PtpCommand* cmd, BYTE *buffer
 
 	HRESULT hr = wpd->pDevValues->SetGuidValue(WPD_PROPERTY_COMMON_COMMAND_CATEGORY,
 		WPD_COMMAND_MTP_EXT_WRITE_DATA.fmtid);
-	if (FAILED(hr)) { LOG("FAILED X\n"); return -1; }
+	if (FAILED(hr)) { mylog("FAILED X\n"); return -1; }
 	hr = wpd->pDevValues->SetUnsignedIntegerValue(WPD_PROPERTY_COMMON_COMMAND_ID,
 			WPD_COMMAND_MTP_EXT_WRITE_DATA.pid);
-	if (FAILED(hr)) { LOG("FAILED X\n"); return -1; }
+	if (FAILED(hr)) { mylog("FAILED X\n"); return -1; }
 	hr = wpd->pDevValues->SetStringValue(WPD_PROPERTY_MTP_EXT_TRANSFER_CONTEXT, pwszContext);
-	if (FAILED(hr)) { LOG("FAILED X\n"); return -1; }
+	if (FAILED(hr)) { mylog("FAILED X\n"); return -1; }
 	hr = wpd->pDevValues->SetUnsignedIntegerValue(WPD_PROPERTY_MTP_EXT_TRANSFER_NUM_BYTES_TO_WRITE, length);
-	if (FAILED(hr)) { LOG("FAILED X\n"); return -1; }
+	if (FAILED(hr)) { mylog("FAILED X\n"); return -1; }
 	hr = wpd->pDevValues->SetBufferValue(WPD_PROPERTY_MTP_EXT_TRANSFER_DATA, buffer, length);
 	if (FAILED(hr)) {
-		LOG("Failed to set data properties\n");
+		mylog("Failed to set data properties\n");
 		return -1;
 	}
 
@@ -444,13 +451,13 @@ int wpd_send_do_data(struct WpdStruct* wpd, struct PtpCommand* cmd, BYTE *buffer
 	if (SUCCEEDED(hr)) {
 		hr = wpd->spResults->GetErrorValue(WPD_PROPERTY_COMMON_HRESULT, &hr);
 		if (SUCCEEDED(hr)) {
-			LOG("Successfully sent data\n");
+			mylog("Successfully sent data\n");
 		} else {
-			LOG("Failed to send data\n");
+			mylog("Failed to send data\n");
 			return -1;
 		}
 	} else {
-		LOG("Failed to send data\n");
+		mylog("Failed to send data\n");
 		return -1;
 	}
 
@@ -458,7 +465,7 @@ int wpd_send_do_data(struct WpdStruct* wpd, struct PtpCommand* cmd, BYTE *buffer
 	hr = wpd->spResults->GetUnsignedIntegerValue(WPD_PROPERTY_MTP_EXT_TRANSFER_NUM_BYTES_WRITTEN,
 		&cbBytesWritten);
 
-	LOG("Sent %d bytes\n", cbBytesWritten);
+	mylog("Sent %d bytes\n", cbBytesWritten);
 
 	send_finished_command(wpd, cmd, pwszContext);
 

@@ -225,16 +225,20 @@ int wpd_get_device_type(struct WpdStruct* wpd) {
 	IPortableDeviceContent* content;
 	HRESULT hr = wpd->pDevice->Content(&content);
 	if (hr) { mylog("content fail\n"); return -1; }
+
 	IPortableDeviceProperties* properties;
 	hr = content->Properties(&properties);
 	if (hr) { mylog("properties fail\n"); return -1; }
+
 	IPortableDeviceKeyCollection* keys = NULL;
 	IPortableDeviceValues* values = NULL;
 	hr = properties->GetValues(WPD_DEVICE_OBJECT_ID, keys, &values);
 	if (hr) { mylog("getvalues fail\n"); return -1; }
+
 	ULONG ti = 0;
 	values->GetUnsignedIntegerValue(WPD_DEVICE_TYPE, &ti);
 	mylog("Device type: %d\n", ti);
+
 	return (int)ti;
 }
 
@@ -291,7 +295,7 @@ int wpd_prep_command(struct WpdStruct* wpd, PROPERTYKEY type, struct PtpCommand*
 }
 
 extern "C" __declspec(dllexport)
-int wpd_recieve_do_command(struct WpdStruct* wpd, struct PtpCommand* cmd) {
+int wpd_receive_do_command(struct WpdStruct* wpd, struct PtpCommand* cmd) {
 	wpd->spResults = NULL;
 	HRESULT hr = wpd_prep_command(
 		wpd,
@@ -341,7 +345,7 @@ int send_finished_command(struct WpdStruct* wpd, struct PtpCommand* cmd, LPWSTR 
 }
 
 extern "C" __declspec(dllexport)
-int wpd_recieve_do_data(struct WpdStruct* wpd, struct PtpCommand* cmd, BYTE * buffer, int length) {
+int wpd_receive_do_data(struct WpdStruct* wpd, struct PtpCommand* cmd, BYTE * buffer, int length) {
 	ULONG cbOptimalDataSize = 0;
 	HRESULT hr = wpd->spResults->GetUnsignedIntegerValue(WPD_PROPERTY_MTP_EXT_TRANSFER_TOTAL_DATA_SIZE,
 		&cbOptimalDataSize);
@@ -362,7 +366,7 @@ int wpd_recieve_do_data(struct WpdStruct* wpd, struct PtpCommand* cmd, BYTE * bu
 
 	hr = wpd->pDevice->SendCommand(0, wpd->pDevValues, &wpd->spResults);
 	if (!SUCCEEDED(hr)) {
-		mylog("Failed to recieve data");
+		mylog("Failed to receive data");
 		return -1;
 	}
 

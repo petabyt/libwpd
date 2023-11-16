@@ -7,17 +7,14 @@
 struct WpdStruct backend_wpd;
 
 int main() {
-	puts("Starting test");
+	puts("inited name");
 	wpd_init(1, L"Camlib WPD");
 	int length = 0;
-
-	puts("Getting devices");
 	wchar_t **devices = wpd_get_devices(&backend_wpd, &length);
 
-	if (length == 0) {
-		puts("No devices found");
-		return -1;
-	}
+	//puts("Got devices\n");
+
+	if (length == 0) return -1;
 
 	for (int i = 0; i < length; i++) {
 		wprintf(L"Trying device: %s\n", devices[i]);

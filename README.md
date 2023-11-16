@@ -1,10 +1,12 @@
 # libwpd
-POSIX/mingw friendly abstraction over WPD. This makes it easier to port libusb software to Windows.
+POSIX-friendly abstraction over [Windows Portable Devices](https://learn.microsoft.com/en-us/windows/win32/windows-portable-devices). This makes it easier to port libusb software (specifically PTP/USB libraries) to Windows.
 
-The DLL is written in Win32 C++, but exposes a basic C API. See https://github.com/petabyt/camlib/blob/master/src/libwpd.c for a basic implementation.
+## How to use
+The DLL is written in Win32 C++, but exposes a basic C API. See `test.c` for a basic example of usage.
+
+The biggest thing to take note of is that WPD doesn't give you a raw IO API. This sends commands to the Windows kernel, requesting to perform
+MTP operations. This means that Windows may be performing commands while you are doing stuff. I don't know the exact specifics (I wrote this a while ago)
+but just be aware of this. But in my experience, I haven't noticed anything go horribly wrong yet.
 
 ## API
-See `libwpd.h` for a POSIX friendly API.
-Note that `wpd_get_devices` returns a pointer to a list of 16-bit Windows-style unicode strings. They will be the standard Win32
-format for identifying devices: `\\?\usb#vid_04a9&pid_32b4#5&3a68d27e&0&2#{6ac27878-a6fa-4155-ba85-f98f491d4f33}` Yes, that is the MS
-way of something like `/dev/bus/usb/001`.
+See `libwpd.h`. My intent is to always keep the API backwards-compatible.

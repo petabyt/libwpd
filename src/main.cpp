@@ -7,11 +7,11 @@
 #include <time.h>
 #include <string>
 #include <initguid.h>
-#include <PortableDeviceApi.h>
-#include <PortableDevice.h>
-#include <WpdMtpExtensions.h>
+#include <PortableDeviceApi.hpp>
+#include <PortableDevice.hpp>
+#include <WpdMtpExtensions.hpp>
 #include <initguid.h>
-#include <wpd_fills.h>
+#include <wpd_fills.hpp>
 #include <codecvt>
 #include <locale>
 

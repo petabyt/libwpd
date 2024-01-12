@@ -268,7 +268,7 @@ typedef struct PortableDeviceWebControl PortableDeviceWebControl;
 
 /* header files for imported files */
 #include "propidl.h"
-#include "PortableDeviceTypes.h"
+#include "PortableDeviceTypes.hpp"
 
 #ifdef __cplusplus
 extern "C"{

@@ -17,10 +17,10 @@
 
 #include "main.h"
 
-// Global verbose debugging flag
+// Global verbose debugging flag (current thread)
 static int verbose = 1;
 
-// Client name
+// Client name (current thread)
 static LPCWSTR client_name;
 
 static void mylog(const char* format, ...) {
@@ -199,16 +199,20 @@ int wpd_get_device_type(struct WpdStruct* wpd) {
 
 	IPortableDeviceProperties* properties;
 	hr = content->Properties(&properties);
-	if (hr) { mylog("properties fail\n"); return -1; }
+	if (hr) { mylog("properties fail (%d)\n", hr); return -1; }
 
 	IPortableDeviceKeyCollection* keys = NULL;
 	IPortableDeviceValues* values = NULL;
 	hr = properties->GetValues(WPD_DEVICE_OBJECT_ID, keys, &values);
-	if (hr) { mylog("getvalues fail\n"); return -1; }
+	if (hr) { mylog("getvalues fail (%d)\n", hr);  }
 
 	ULONG ti = 0;
 	values->GetUnsignedIntegerValue(WPD_DEVICE_TYPE, &ti);
 	mylog("Device type: %d\n", ti);
+
+	values->Release();
+	properties->Release();
+	content->Release();
 
 	return (int)ti;
 }

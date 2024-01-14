@@ -11,13 +11,13 @@ struct PtpCommand {
 	int code;
 	uint32_t params[5];
 	int param_length;
-	int data_length;
 };
 
 struct WpdStruct {
 	IPortableDevice* pDevice;
 	IPortableDeviceValues* spResults;
 	IPortableDeviceValues* pDevValues;
+	IPortableDeviceValues* pClientInformation;
 };
 
 #pragma pack(pop)

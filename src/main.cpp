@@ -58,7 +58,7 @@ PWSTR * wpd_get_devices(struct WpdStruct* wpd, DWORD * numDevices) {
 		CLSCTX_INPROC_SERVER,
 		IID_PPV_ARGS(&pPortableDeviceManager));
 	if (!SUCCEEDED(hr)) {
-		mylog("Error %d\n", GetLastError());
+		mylog("CoCreateInstance Error %X\n", HRESULT_FROM_WIN32(GetLastError()));
 		return NULL;
 	}
 
@@ -160,14 +160,7 @@ int wpd_open_device(struct WpdStruct* wpd, PWSTR deviceId) {
 		return 1;
 	}
 
-	// Get properties
-#if 0
-	// Release the IPortableDeviceValues that contains the client information when finished
-	if (pClientInformation != NULL) {
-		pClientInformation->Release();
-		pClientInformation = NULL;
-	}
-#endif
+	wpd->pClientInformation = pClientInformation;
 
 	// TODO:
 	HANDLE handle = CreateEvent(nullptr, false, false, nullptr);
@@ -204,7 +197,7 @@ int wpd_get_device_type(struct WpdStruct* wpd) {
 	IPortableDeviceKeyCollection* keys = NULL;
 	IPortableDeviceValues* values = NULL;
 	hr = properties->GetValues(WPD_DEVICE_OBJECT_ID, keys, &values);
-	if (hr) { mylog("getvalues fail (%d)\n", hr);  }
+	if (hr) { mylog("getvalues fail (%d)\n", hr); return -1; }
 
 	ULONG ti = 0;
 	values->GetUnsignedIntegerValue(WPD_DEVICE_TYPE, &ti);
@@ -279,6 +272,10 @@ int wpd_receive_do_command(struct WpdStruct* wpd, struct PtpCommand* cmd) {
 	);
 
 	hr = wpd->pDevice->SendCommand(0, wpd->pDevValues, &wpd->spResults);
+	if (FAILED(hr)) {
+		mylog("Failed to send command.\n");
+		return -1;
+	}
 
 	return 0;
 }
@@ -347,7 +344,7 @@ int wpd_receive_do_data(struct WpdStruct* wpd, struct PtpCommand* cmd, BYTE * bu
 
 	wpd->spResults->GetErrorValue(WPD_PROPERTY_COMMON_HRESULT, &hr);
 	if (hr) {
-		mylog("Failed to finish command\n");
+		mylog("Failed to finish command (%X)\n", hr);
 		return -1;
 	}
 

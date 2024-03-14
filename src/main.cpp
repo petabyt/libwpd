@@ -196,11 +196,14 @@ int wpd_get_device_type(struct WpdStruct* wpd) {
 
 	IPortableDeviceKeyCollection* keys = NULL;
 	IPortableDeviceValues* values = NULL;
-	hr = properties->GetValues(WPD_DEVICE_OBJECT_ID, keys, &values);
-	if (hr) { mylog("getvalues fail (%d)\n", hr); return -1; }
-
+	properties->GetValues(WPD_DEVICE_OBJECT_ID, keys, &values);
+	
 	ULONG ti = 0;
-	values->GetUnsignedIntegerValue(WPD_DEVICE_TYPE, &ti);
+	hr = values->GetUnsignedIntegerValue(WPD_DEVICE_TYPE, &ti);
+	if (hr) {
+		mylog("WPD_DEVICE_TYPE not found\n");
+		return -1;
+	}
 	mylog("Device type: %d\n", ti);
 
 	values->Release();

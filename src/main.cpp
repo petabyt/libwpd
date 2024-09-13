@@ -14,7 +14,7 @@
 #include <wpd_fills.hpp>
 #include <codecvt>
 #include <locale>
-
+#include "ptp.h"
 #include "main.h"
 
 // Global verbose debugging flag (current thread)
@@ -23,12 +23,32 @@ static int verbose = 1;
 // Client name (current thread)
 static LPCWSTR client_name;
 
-static void mylog(const char* format, ...) {
+void mylog(const char* format, ...) {
 	if (verbose == 0) return;
+	printf("libwpd: ");
 	va_list args;
 	va_start(args, format);
 	vprintf(format, args);
 	va_end(args);
+}
+
+extern "C" __declspec(dllexport)
+struct WpdStruct *wpd_new() {
+	struct WpdStruct *wpd = (struct WpdStruct *)malloc(sizeof(struct WpdStruct));
+	wpd->pDevice = NULL;
+	wpd->pDevValues = NULL;
+	wpd->spResults = NULL;
+
+	wpd->in_buffer_pos = 0;
+	wpd->in_buffer = (uint8_t *)malloc(1000);
+	wpd->in_buffer_size = 1000;
+
+	wpd->out_buffer_pos = 0;
+	wpd->out_buffer = (uint8_t *)malloc(1000);
+	wpd->out_buffer_size = 1000;
+	wpd->out_buffer_filled = 0;
+
+	return wpd;
 }
 
 extern "C" __declspec(dllexport)
@@ -47,10 +67,6 @@ int wpd_init(int v, LPCWSTR name) {
 
 extern "C" __declspec(dllexport)
 PWSTR * wpd_get_devices(struct WpdStruct* wpd, DWORD * numDevices) {
-	wpd->pDevice = NULL;
-	wpd->pDevValues = NULL;
-	wpd->spResults = NULL;
-
 	IPortableDeviceManager* pPortableDeviceManager = nullptr;
 
 	HRESULT hr = CoCreateInstance(CLSID_PortableDeviceManager,
@@ -451,4 +467,123 @@ int wpd_send_do_data(struct WpdStruct* wpd, struct PtpCommand* cmd, BYTE *buffer
 	CoTaskMemFree(pwszContext);
 
 	return cbBytesWritten;
+}
+
+extern "C" __declspec(dllexport)
+int wpd_cmd_write(struct WpdStruct* wpd, void *data, int size) {
+	if (wpd->in_buffer_size - wpd->in_buffer_pos <= size) {
+		wpd->in_buffer = (uint8_t *)realloc(wpd->in_buffer, wpd->in_buffer_pos + size);
+	}
+
+	memcpy(wpd->in_buffer + wpd->in_buffer_pos, data, size);
+
+	wpd->in_buffer_pos += size;
+
+	return size;
+}
+
+extern "C" __declspec(dllexport)
+int wpd_cmd_read(struct WpdStruct* wpd, void *data, int size) {
+	if (wpd->in_buffer_pos < 12) {
+		mylog("input buffer too small %d\n", wpd->in_buffer_pos);
+	}
+
+	int length = 0;
+
+	struct PtpCommand cmd;
+	struct PtpBulkContainer *bulk = (struct PtpBulkContainer *)(wpd->in_buffer);
+	if (bulk->type != PTP_PACKET_TYPE_COMMAND) {
+		mylog("Not command packet\n");
+	}
+
+	// WPD won't let us do any session operations - Windows explorer controls that
+	if (bulk->code == PTP_OC_OpenSession || bulk->code == PTP_OC_CloseSession) {
+		struct PtpBulkContainer *out_bulk = (struct PtpBulkContainer *)(wpd->out_buffer);
+		out_bulk->length = 12;
+		out_bulk->code = PTP_RC_OK;
+		out_bulk->type = PTP_PACKET_TYPE_RESPONSE;
+		memset(out_bulk->params, 0, 5 * sizeof(uint32_t));
+		wpd->out_buffer_filled = 12;
+		goto end;
+	}
+
+	cmd.code = bulk->code;
+	cmd.param_length = (bulk->length - 12) / 4;
+	for (int i = 0; i < cmd.param_length; i++) {
+		cmd.params[i] = bulk->params[i];
+	}
+
+	// Check if there is a data packet following this one (data phase)
+	int rc;
+	if (wpd->in_buffer_pos > bulk->length) {
+		int packet_size = wpd->in_buffer_pos - bulk->length;
+		if (packet_size < 12) {
+			mylog("data packet too small\n");
+		}
+		struct PtpBulkContainer *data = (struct PtpBulkContainer *)(wpd->in_buffer + bulk->length);
+		if (data->type != PTP_PACKET_TYPE_DATA) {
+			mylog("not data packet\n");
+		}
+
+		// Send command packet with a hint for the payload length
+		rc = wpd_send_do_command(wpd, &cmd, data->length);
+		if (rc) return -1;
+
+		// Send data payload
+		// this will fill the cmd struct
+		cmd.param_length = 0;
+		rc = wpd_send_do_data(wpd, &cmd, (uint8_t *)data + 12, data->length - 12);
+		if (rc) return -1;
+
+		struct PtpBulkContainer *out_cmd = (struct PtpBulkContainer *)(wpd->out_buffer);
+		// TODO: Ensure out_buffer_size >= 12
+		out_cmd->length = 12;
+		out_cmd->type = PTP_PACKET_TYPE_RESPONSE;
+		out_cmd->code = cmd.code;
+		out_cmd->transaction = bulk->transaction + 1; // we fake the transaction ID
+		wpd->out_buffer_pos = 0;
+		wpd->out_buffer_filled = 12;
+		goto end;
+	} else {
+		// Send a command packet, no data phase
+		rc = wpd_receive_do_command(wpd, &cmd);
+		if (rc) return -1;
+	}
+
+	// Receive the PTP response
+	rc = wpd_receive_do_data(wpd, &cmd, wpd->out_buffer, wpd->out_buffer_size - 12); // TODO: Increase out buffer size
+	if (rc < 0) return -1;
+	if (rc > 0) {
+		// Place data packet and cmd packet in the out buffer
+		struct PtpBulkContainer *out_cmd = (struct PtpBulkContainer *)(wpd->out_buffer);
+		out_cmd->length = 12 + rc;
+		out_cmd->type = PTP_PACKET_TYPE_DATA;
+		out_cmd->code = cmd.code;
+		out_cmd->transaction = bulk->transaction + 1;
+
+		length = 12 + rc;
+
+		struct PtpBulkContainer *resp = (struct PtpBulkContainer*)(wpd->out_buffer + 12 + rc);
+		resp->length = 12;
+		resp->type = PTP_PACKET_TYPE_RESPONSE;
+		resp->code = cmd.code;
+		resp->transaction = bulk->transaction + 1;
+
+		length += 12;
+		wpd->out_buffer_pos = 0;
+		wpd->out_buffer_filled = length;
+		goto end;
+	}
+
+	end:;
+	wpd->in_buffer_pos = 0;
+
+	if (wpd->out_buffer_filled - wpd->out_buffer_pos < size) {
+		size = wpd->out_buffer_filled - wpd->out_buffer_pos;
+	}
+
+	memcpy(data, wpd->out_buffer + wpd->out_buffer_pos, size);
+	length = size;
+	
+	return length;
 }

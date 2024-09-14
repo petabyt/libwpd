@@ -1,3 +1,4 @@
+// WPD HRESULT Error codes: https://learn.microsoft.com/en-us/windows/win32/wpd_sdk/error-constants
 #include <windows.h>
 #include <conio.h>
 #include <stdarg.h>
@@ -320,17 +321,34 @@ int send_finished_command(struct WpdStruct* wpd, struct PtpCommand* cmd, LPWSTR 
 
 	wpd->spResults->GetErrorValue(WPD_PROPERTY_COMMON_HRESULT, &hr);
 	if (FAILED(hr)) {
-		mylog("Completion command failed\n");
+		mylog("Completion command failed: %X\n", hr);
 		return -1;
+	}
+
+	IPortableDevicePropVariantCollection *params;
+	hr = wpd->spResults->GetIPortableDevicePropVariantCollectionValue(WPD_PROPERTY_MTP_EXT_RESPONSE_PARAMS, &params);
+	if (FAILED(hr)) {
+		mylog("Failed to get response params\n");
+	} else {
+		DWORD params_count;
+		params->GetCount(&params_count);
+
+		PROPVARIANT prop;
+		cmd->param_length = (int)params_count;
+		for (int i = 0; i < params_count; i++) {
+			params->GetAt(i, &prop);
+			cmd->params[i] = prop.ulVal;
+			PropVariantClear(&prop);
+		}
 	}
 
 	DWORD dwResponseCode = 0;
 	hr = wpd->spResults->GetUnsignedIntegerValue(WPD_PROPERTY_MTP_EXT_RESPONSE_CODE, &dwResponseCode);
 	if (FAILED(hr)) {
 		mylog("Failed to get response code %X\n", hr);
-		dwResponseCode = 0x2001;
+		dwResponseCode = 0x2000;
 	}
-	mylog("Return code: %X\n", dwResponseCode);
+	mylog("Return code: 0x%x\n", dwResponseCode);
 	cmd->code = dwResponseCode;
 	return 0;
 }
@@ -380,9 +398,6 @@ int wpd_receive_do_data(struct WpdStruct* wpd, struct PtpCommand* cmd, BYTE * bu
 	// Win32 quirk note: the data is not actually transferred into `buffer`. Makes no sense, but Windows
 	// Requires it for some reason. We'll just copy it to where it should be.
 	memcpy(buffer, bufferOut, cbBytesRead);
-
-	//IPortableDevicePropVariantCollection *params;
-	//wpd->spResults->GetIPortableDevicePropVariantCollectionValue(WPD_PROPERTY_MTP_EXT_RESPONSE_PARAMS, &params);
 
 	send_finished_command(wpd, cmd, pwszContext);
 
@@ -470,7 +485,7 @@ int wpd_send_do_data(struct WpdStruct* wpd, struct PtpCommand* cmd, BYTE *buffer
 }
 
 extern "C" __declspec(dllexport)
-int wpd_cmd_write(struct WpdStruct* wpd, void *data, int size) {
+int wpd_ptp_cmd_write(struct WpdStruct* wpd, void *data, int size) {
 	if (wpd->in_buffer_size - wpd->in_buffer_pos <= size) {
 		wpd->in_buffer = (uint8_t *)realloc(wpd->in_buffer, wpd->in_buffer_pos + size);
 	}
@@ -483,15 +498,18 @@ int wpd_cmd_write(struct WpdStruct* wpd, void *data, int size) {
 }
 
 extern "C" __declspec(dllexport)
-int wpd_cmd_read(struct WpdStruct* wpd, void *data, int size) {
+int wpd_ptp_cmd_read(struct WpdStruct* wpd, void *data, int size) {
+	struct PtpCommand cmd;
+	struct PtpBulkContainer *bulk = (struct PtpBulkContainer *)(wpd->in_buffer);
+	// Return any leftover data first before trying the stored command
+	if (wpd->out_buffer_filled - wpd->out_buffer_pos > 0) {
+		goto end;
+	}
+
 	if (wpd->in_buffer_pos < 12) {
 		mylog("input buffer too small %d\n", wpd->in_buffer_pos);
 	}
 
-	int length = 0;
-
-	struct PtpCommand cmd;
-	struct PtpBulkContainer *bulk = (struct PtpBulkContainer *)(wpd->in_buffer);
 	if (bulk->type != PTP_PACKET_TYPE_COMMAND) {
 		mylog("Not command packet\n");
 	}
@@ -520,19 +538,21 @@ int wpd_cmd_read(struct WpdStruct* wpd, void *data, int size) {
 		if (packet_size < 12) {
 			mylog("data packet too small\n");
 		}
-		struct PtpBulkContainer *data = (struct PtpBulkContainer *)(wpd->in_buffer + bulk->length);
-		if (data->type != PTP_PACKET_TYPE_DATA) {
+		struct PtpBulkContainer *in_cmd = (struct PtpBulkContainer *)(wpd->in_buffer + bulk->length);
+		if (in_cmd->type != PTP_PACKET_TYPE_DATA) {
 			mylog("not data packet\n");
 		}
 
 		// Send command packet with a hint for the payload length
-		rc = wpd_send_do_command(wpd, &cmd, data->length);
+		mylog("wpd_send_do_command, hint %d\n", in_cmd->length - 12);
+		rc = wpd_send_do_command(wpd, &cmd, in_cmd->length - 12);
 		if (rc) return -1;
 
 		// Send data payload
 		// this will fill the cmd struct
 		cmd.param_length = 0;
-		rc = wpd_send_do_data(wpd, &cmd, (uint8_t *)data + 12, data->length - 12);
+		mylog("wpd_send_do_data %d\n", in_cmd->length - 12);
+		rc = wpd_send_do_data(wpd, &cmd, (uint8_t *)in_cmd + 12, in_cmd->length - 12);
 		if (rc) return -1;
 
 		struct PtpBulkContainer *out_cmd = (struct PtpBulkContainer *)(wpd->out_buffer);
@@ -541,8 +561,10 @@ int wpd_cmd_read(struct WpdStruct* wpd, void *data, int size) {
 		out_cmd->type = PTP_PACKET_TYPE_RESPONSE;
 		out_cmd->code = cmd.code;
 		out_cmd->transaction = bulk->transaction + 1; // we fake the transaction ID
+		// TODO: Fill response params
 		wpd->out_buffer_pos = 0;
 		wpd->out_buffer_filled = 12;
+		// We don't expect a data response when sending data
 		goto end;
 	} else {
 		// Send a command packet, no data phase
@@ -551,7 +573,7 @@ int wpd_cmd_read(struct WpdStruct* wpd, void *data, int size) {
 	}
 
 	// Receive the PTP response
-	rc = wpd_receive_do_data(wpd, &cmd, wpd->out_buffer, wpd->out_buffer_size - 12); // TODO: Increase out buffer size
+	rc = wpd_receive_do_data(wpd, &cmd, wpd->out_buffer + 12, wpd->out_buffer_size - 12); // TODO: Increase out buffer size
 	if (rc < 0) return -1;
 	if (rc > 0) {
 		// Place data packet and cmd packet in the out buffer
@@ -560,8 +582,7 @@ int wpd_cmd_read(struct WpdStruct* wpd, void *data, int size) {
 		out_cmd->type = PTP_PACKET_TYPE_DATA;
 		out_cmd->code = cmd.code;
 		out_cmd->transaction = bulk->transaction + 1;
-
-		length = 12 + rc;
+		int length = 12 + rc;
 
 		struct PtpBulkContainer *resp = (struct PtpBulkContainer*)(wpd->out_buffer + 12 + rc);
 		resp->length = 12;
@@ -578,12 +599,13 @@ int wpd_cmd_read(struct WpdStruct* wpd, void *data, int size) {
 	end:;
 	wpd->in_buffer_pos = 0;
 
+	// Truncate response
 	if (wpd->out_buffer_filled - wpd->out_buffer_pos < size) {
 		size = wpd->out_buffer_filled - wpd->out_buffer_pos;
 	}
 
 	memcpy(data, wpd->out_buffer + wpd->out_buffer_pos, size);
-	length = size;
+	wpd->out_buffer_pos += size;
 	
-	return length;
+	return size;
 }

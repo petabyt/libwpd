@@ -30,17 +30,35 @@ struct PtpBulkContainer {
 };
 
 int try_raw(struct WpdStruct *wpd) {
+	unsigned char buffer[512];
 	struct PtpBulkContainer cmd;
+
+	// OpenSession
+	cmd.length = 12 + 4;
+	cmd.type = 1;
+	cmd.code = 0x1002;
+	cmd.transaction = 1;
+	cmd.params[0] = 1;
+
+	int rc = wpd_ptp_cmd_write(wpd, &cmd, 12);
+	if (rc < 0) return rc;
+	rc = wpd_ptp_cmd_read(wpd, buffer, 512);
+	if (rc < 0) return rc;
+
+	// GetDeviceInfo
 	cmd.length = 12;
 	cmd.type = 1;
 	cmd.code = 0x1001;
 	cmd.transaction = 1;
 
-	int rc = wpd_cmd_write(wpd, &cmd, 12);
+	rc = wpd_ptp_cmd_write(wpd, &cmd, 12);
+	if (rc < 0) return rc;
+	rc = wpd_ptp_cmd_read(wpd, buffer, 512);
+	if (rc < 0) return rc;
 
-	char buffer[512];
-	wpd_cmd_read(wpd, buffer, 512);
-
+	for (int i = 0; i < rc; i++) {
+		printf("%02x ", buffer[i]);
+	}
 	return 0;
 }
 

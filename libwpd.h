@@ -49,8 +49,16 @@ int wpd_close_device(struct WpdStruct* wpd);
 /// @brief Returns enum WPD_DEVICE_TYPES
 int wpd_get_device_type(struct WpdStruct *wpd);
 
-int wpd_cmd_write(struct WpdStruct *wpd, void *data, int size);
-int wpd_cmd_read(struct WpdStruct *wpd, void *data, int size);
+/// @brief Generic USB writing command. Will store all sent data into a buffer, which will be processed when wpd_ptp_cmd_read is called.
+int wpd_ptp_cmd_write(struct WpdStruct *wpd, void *data, int size);
+
+/// @brief Processes all PTP packets sent through wpd_ptp_cmd_write, and performs operations. Will then store all results in the 'out' buffer.
+/// Every time this function is called, it will return data from the 'out' buffer, as requested by `size`.
+int wpd_ptp_cmd_read(struct WpdStruct *wpd, void *data, int size);
+
+
+// Manual old API:
+
 
 /// @brief Send command packet with no data packet, but expect data packet (device may not send data packet, that is fine)
 /// Data packet should be recieved with wpd_receive_do_data

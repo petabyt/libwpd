@@ -354,17 +354,22 @@ int send_finished_command(struct WpdStruct* wpd, struct PtpCommand* cmd, LPWSTR 
 }
 
 extern "C" __declspec(dllexport)
-int wpd_receive_do_data(struct WpdStruct* wpd, struct PtpCommand* cmd, BYTE *buffer, int length) {
+int wpd_get_optimal_data_size(struct WpdStruct *wpd) {
 	ULONG cbOptimalDataSize = 0;
 	HRESULT hr = wpd->spResults->GetUnsignedIntegerValue(WPD_PROPERTY_MTP_EXT_TRANSFER_TOTAL_DATA_SIZE,
 		&cbOptimalDataSize);
 
-	mylog("Optimal data size: %d, max %d\n", cbOptimalDataSize, length);
+	mylog("Optimal data size: %d\n", cbOptimalDataSize);
 
+	return (int)cbOptimalDataSize;	
+}
+
+extern "C" __declspec(dllexport)
+int wpd_receive_do_data(struct WpdStruct* wpd, struct PtpCommand* cmd, BYTE *buffer, int length) {
 	LPWSTR pwszContext = NULL;
 	wpd->spResults->GetStringValue(WPD_PROPERTY_MTP_EXT_TRANSFER_CONTEXT, &pwszContext);
 
-	hr = wpd->pDevValues->Clear();
+	HRESULT hr = wpd->pDevValues->Clear();
 	hr |= wpd->pDevValues->SetGuidValue(WPD_PROPERTY_COMMON_COMMAND_CATEGORY,
 		WPD_COMMAND_MTP_EXT_READ_DATA.fmtid);
 	hr |= wpd->pDevValues->SetUnsignedIntegerValue(WPD_PROPERTY_COMMON_COMMAND_ID,
@@ -591,8 +596,13 @@ int wpd_ptp_cmd_read(struct WpdStruct* wpd, void *data, int size) {
 		rc = wpd_receive_do_command(wpd, &cmd);
 		if (rc) return -3;
 
+		int payload_size = wpd_get_optimal_data_size(wpd);
+		if (payload_size > wpd->out_buffer_size - 50) {
+			wpd->out_buffer = (uint8_t *)realloc(wpd->out_buffer, payload_size + 50);
+		}
+
 		// Receive the PTP response
-		int payload_size = wpd_receive_do_data(wpd, &cmd, wpd->out_buffer + 12, wpd->out_buffer_size - 12); // TODO: Increase out buffer size
+		payload_size = wpd_receive_do_data(wpd, &cmd, wpd->out_buffer + 12, wpd->out_buffer_size - 12); // TODO: Increase out buffer size
 		if (rc < 0) return -2;
 
 		// Place data packet and cmd packet in the out buffer

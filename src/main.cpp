@@ -41,12 +41,12 @@ struct WpdStruct *wpd_new() {
 	wpd->spResults = NULL;
 
 	wpd->in_buffer_pos = 0;
-	wpd->in_buffer = (uint8_t *)malloc(1000);
-	wpd->in_buffer_size = 1000;
+	wpd->in_buffer = (uint8_t *)malloc(10000);
+	wpd->in_buffer_size = 10000;
 
 	wpd->out_buffer_pos = 0;
-	wpd->out_buffer = (uint8_t *)malloc(1000);
-	wpd->out_buffer_size = 1000;
+	wpd->out_buffer = (uint8_t *)malloc(10000);
+	wpd->out_buffer_size = 10000;
 	wpd->out_buffer_filled = 0;
 
 	return wpd;
@@ -354,7 +354,7 @@ int send_finished_command(struct WpdStruct* wpd, struct PtpCommand* cmd, LPWSTR 
 }
 
 extern "C" __declspec(dllexport)
-int wpd_receive_do_data(struct WpdStruct* wpd, struct PtpCommand* cmd, BYTE * buffer, int length) {
+int wpd_receive_do_data(struct WpdStruct* wpd, struct PtpCommand* cmd, BYTE *buffer, int length) {
 	ULONG cbOptimalDataSize = 0;
 	HRESULT hr = wpd->spResults->GetUnsignedIntegerValue(WPD_PROPERTY_MTP_EXT_TRANSFER_TOTAL_DATA_SIZE,
 		&cbOptimalDataSize);
@@ -385,7 +385,7 @@ int wpd_receive_do_data(struct WpdStruct* wpd, struct PtpCommand* cmd, BYTE * bu
 		return -1;
 	}
 
-	BYTE* bufferOut = NULL;
+	BYTE *bufferOut = NULL;
 	ULONG cbBytesRead = 0;
 	hr = wpd->spResults->GetBufferValue(WPD_PROPERTY_MTP_EXT_TRANSFER_DATA, &bufferOut, &cbBytesRead);
 	if (hr) {
@@ -399,7 +399,8 @@ int wpd_receive_do_data(struct WpdStruct* wpd, struct PtpCommand* cmd, BYTE * bu
 	// Requires it for some reason. We'll just copy it to where it should be.
 	memcpy(buffer, bufferOut, cbBytesRead);
 
-	send_finished_command(wpd, cmd, pwszContext);
+	hr = send_finished_command(wpd, cmd, pwszContext);
+	if (hr) return hr;
 
 	CoTaskMemFree(pwszContext);
 
@@ -477,7 +478,8 @@ int wpd_send_do_data(struct WpdStruct* wpd, struct PtpCommand* cmd, BYTE *buffer
 
 	mylog("Sent %d bytes\n", cbBytesWritten);
 
-	send_finished_command(wpd, cmd, pwszContext);
+	hr = send_finished_command(wpd, cmd, pwszContext);
+	if (hr) return hr;
 
 	CoTaskMemFree(pwszContext);
 
@@ -485,14 +487,23 @@ int wpd_send_do_data(struct WpdStruct* wpd, struct PtpCommand* cmd, BYTE *buffer
 }
 
 extern "C" __declspec(dllexport)
-int wpd_ptp_cmd_write(struct WpdStruct* wpd, void *data, int size) {
+int wpd_ptp_cmd_write(struct WpdStruct *wpd, void *data, int size) {
+	mylog("Filling buffer +%d\n", size);
 	if (wpd->in_buffer_size - wpd->in_buffer_pos <= size) {
 		wpd->in_buffer = (uint8_t *)realloc(wpd->in_buffer, wpd->in_buffer_pos + size);
+		if (wpd->in_buffer == NULL) {
+			mylog("realloc(%d) failed", wpd->in_buffer_pos + size);
+			abort();
+		}
 	}
 
 	memcpy(wpd->in_buffer + wpd->in_buffer_pos, data, size);
 
 	wpd->in_buffer_pos += size;
+
+	// Invalidate
+	wpd->out_buffer_filled = 0;
+	wpd->out_buffer_pos = 0;
 
 	return size;
 }
@@ -501,17 +512,26 @@ extern "C" __declspec(dllexport)
 int wpd_ptp_cmd_read(struct WpdStruct* wpd, void *data, int size) {
 	struct PtpCommand cmd;
 	struct PtpBulkContainer *bulk = (struct PtpBulkContainer *)(wpd->in_buffer);
+
 	// Return any leftover data first before trying the stored command
-	if (wpd->out_buffer_filled - wpd->out_buffer_pos > 0) {
+	mylog("Request to send %d\n", size);
+	if ((wpd->out_buffer_filled - wpd->out_buffer_pos) > 0) {
 		goto end;
 	}
 
+	if (wpd->in_buffer_pos == 0) {
+		mylog("Nothing to do\n");
+		return 0;
+	}
+
 	if (wpd->in_buffer_pos < 12) {
-		mylog("input buffer too small %d\n", wpd->in_buffer_pos);
+		mylog("input buffer too small (%d)\n", wpd->in_buffer_pos);
+		return -1;
 	}
 
 	if (bulk->type != PTP_PACKET_TYPE_COMMAND) {
 		mylog("Not command packet\n");
+		return -1;
 	}
 
 	// WPD won't let us do any session operations - Windows explorer controls that
@@ -546,14 +566,14 @@ int wpd_ptp_cmd_read(struct WpdStruct* wpd, void *data, int size) {
 		// Send command packet with a hint for the payload length
 		mylog("wpd_send_do_command, hint %d\n", in_cmd->length - 12);
 		rc = wpd_send_do_command(wpd, &cmd, in_cmd->length - 12);
-		if (rc) return -1;
+		if (rc) return -5;
 
 		// Send data payload
 		// this will fill the cmd struct
 		cmd.param_length = 0;
 		mylog("wpd_send_do_data %d\n", in_cmd->length - 12);
 		rc = wpd_send_do_data(wpd, &cmd, (uint8_t *)in_cmd + 12, in_cmd->length - 12);
-		if (rc) return -1;
+		if (rc < 0) return -1;
 
 		struct PtpBulkContainer *out_cmd = (struct PtpBulkContainer *)(wpd->out_buffer);
 		// TODO: Ensure out_buffer_size >= 12
@@ -564,27 +584,26 @@ int wpd_ptp_cmd_read(struct WpdStruct* wpd, void *data, int size) {
 		// TODO: Fill response params
 		wpd->out_buffer_pos = 0;
 		wpd->out_buffer_filled = 12;
-		// We don't expect a data response when sending data
-		goto end;
+		// (We don't expect a data response when sending data)
+		//goto end;
 	} else {
 		// Send a command packet, no data phase
 		rc = wpd_receive_do_command(wpd, &cmd);
-		if (rc) return -1;
-	}
+		if (rc) return -3;
 
-	// Receive the PTP response
-	rc = wpd_receive_do_data(wpd, &cmd, wpd->out_buffer + 12, wpd->out_buffer_size - 12); // TODO: Increase out buffer size
-	if (rc < 0) return -1;
-	if (rc > 0) {
+		// Receive the PTP response
+		int payload_size = wpd_receive_do_data(wpd, &cmd, wpd->out_buffer + 12, wpd->out_buffer_size - 12); // TODO: Increase out buffer size
+		if (rc < 0) return -2;
+
 		// Place data packet and cmd packet in the out buffer
 		struct PtpBulkContainer *out_cmd = (struct PtpBulkContainer *)(wpd->out_buffer);
-		out_cmd->length = 12 + rc;
+		out_cmd->length = 12 + payload_size;
 		out_cmd->type = PTP_PACKET_TYPE_DATA;
 		out_cmd->code = cmd.code;
 		out_cmd->transaction = bulk->transaction + 1;
-		int length = 12 + rc;
+		int length = 12 + payload_size;
 
-		struct PtpBulkContainer *resp = (struct PtpBulkContainer*)(wpd->out_buffer + 12 + rc);
+		struct PtpBulkContainer *resp = (struct PtpBulkContainer*)(wpd->out_buffer + 12 + payload_size);
 		resp->length = 12;
 		resp->type = PTP_PACKET_TYPE_RESPONSE;
 		resp->code = cmd.code;
@@ -593,19 +612,23 @@ int wpd_ptp_cmd_read(struct WpdStruct* wpd, void *data, int size) {
 		length += 12;
 		wpd->out_buffer_pos = 0;
 		wpd->out_buffer_filled = length;
-		goto end;
 	}
 
 	end:;
 	wpd->in_buffer_pos = 0;
 
+	if (wpd->out_buffer_pos > wpd->out_buffer_filled) {
+		mylog("Illegal send data overflow %d > %d\n", wpd->out_buffer_pos, wpd->out_buffer_filled);
+		abort();
+	}
+
 	// Truncate response
-	if (wpd->out_buffer_filled - wpd->out_buffer_pos < size) {
+	if ((wpd->out_buffer_filled - wpd->out_buffer_pos) < size) {
 		size = wpd->out_buffer_filled - wpd->out_buffer_pos;
 	}
 
+	mylog("Sending %d\n", size);
 	memcpy(data, wpd->out_buffer + wpd->out_buffer_pos, size);
 	wpd->out_buffer_pos += size;
-	
 	return size;
 }

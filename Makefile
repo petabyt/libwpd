@@ -1,9 +1,9 @@
 -include config.mak
-CPPFLAGS := -Iwindows/ -g
+CPPFLAGS := -Iwindows/ -g -Wall -Wshadow -Wcast-qual -Wpedantic -Werror=deprecated-declarations -Wno-unknown-pragmas
 MINGW := x86_64-w64-mingw32
 CC := $(MINGW)-gcc
 CPP := $(MINGW)-c++
-FILES := src/dll.o src/main.o
+FILES := src/dll.o src/main.o src/parse.o
 LDFLAGS := -shared -lole32 -loleaut32 -lportabledeviceguids
 
 libwpd_64.dll: $(FILES)

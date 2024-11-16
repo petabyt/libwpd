@@ -5,9 +5,10 @@
 #include "libwpd.h"
 
 int try_commands(struct WpdStruct *wpd) {
+	// Try the legacy manual API (functions are badly named and confusing, sorry)
 	int rc;
 	struct LibWPDPtpCommand cmd;
-	char buffer[4096];
+	uint8_t buffer[4096];
 
 	cmd.code = 0x1001;
 	cmd.param_length = 1;
@@ -30,6 +31,7 @@ struct PtpBulkContainer {
 };
 
 int try_raw(struct WpdStruct *wpd) {
+	// Use the opcode conversion layer to send manual PTP packets
 	unsigned char buffer[512];
 	struct PtpBulkContainer cmd;
 
@@ -75,7 +77,10 @@ int connect() {
 	}
 
 	for (int i = 0; i < length; i++) {
-		wprintf(L"Trying device: %s\n", devices[i]);
+		struct LibWPDDescriptor d;
+		if (wpd_parse_io_path(devices[i], &d) == 0) {
+			printf("product id: %04x, vendor id: %04x\n", d.product_id, d.vendor_id);
+		}
 
 		int ret = wpd_open_device(wpd, devices[i]);
 		if (ret) {
@@ -100,7 +105,5 @@ int main() {
 	puts("Starting test");
 	wpd_init(1, L"Camlib WPD");
 
-	connect();
-
-	return -1;
+	return connect();
 }

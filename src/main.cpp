@@ -67,7 +67,7 @@ int wpd_init(int v, LPCWSTR name) {
 }
 
 extern "C" __declspec(dllexport)
-PWSTR * wpd_get_devices(struct WpdStruct* wpd, DWORD * numDevices) {
+PWSTR *wpd_get_devices(struct WpdStruct *wpd, int *numDevices) {
 	IPortableDeviceManager* pPortableDeviceManager = nullptr;
 
 	HRESULT hr = CoCreateInstance(CLSID_PortableDeviceManager,
@@ -79,23 +79,34 @@ PWSTR * wpd_get_devices(struct WpdStruct* wpd, DWORD * numDevices) {
 		return NULL;
 	}
 
-	hr = pPortableDeviceManager->GetDevices(NULL, numDevices);
+	DWORD mNumDevices;
+
+	hr = pPortableDeviceManager->GetDevices(NULL, &mNumDevices);
 	if (!SUCCEEDED(hr)) {
 		mylog("Error getting devices length\n");
 		return NULL;
 	}
+	(*numDevices) = (int)mNumDevices;
 
-	mylog("Detected %d devices.\n", (*numDevices));
+	mylog("Detected %d devices.\n", mNumDevices);
 
-	PWSTR* deviceIDs = (PWSTR*)malloc(sizeof(PWSTR) * (*numDevices));
+	PWSTR *deviceIDs = (PWSTR *)malloc(sizeof(PWSTR) * mNumDevices);
 
-	hr = pPortableDeviceManager->GetDevices(deviceIDs, numDevices);
+	hr = pPortableDeviceManager->GetDevices(deviceIDs, &mNumDevices);
 	if (!SUCCEEDED(hr)) {
 		mylog("Error getting devices\n");
 		return NULL;
 	}
 
 	return deviceIDs;
+}
+
+extern "C" __declspec(dllexport)
+void wpd_free_devices(struct WpdStruct *wpd, PWSTR *devs, int numDevices) {
+	for (int i = 0; i < numDevices; i++) {
+		CoTaskMemFree(devs[i]);
+	}
+	free(devs);
 }
 
 extern "C" __declspec(dllexport)
@@ -335,7 +346,7 @@ int send_finished_command(struct WpdStruct* wpd, struct PtpCommand* cmd, LPWSTR 
 
 		PROPVARIANT prop;
 		cmd->param_length = (int)params_count;
-		for (int i = 0; i < params_count; i++) {
+		for (DWORD i = 0; i < params_count; i++) {
 			params->GetAt(i, &prop);
 			cmd->params[i] = prop.ulVal;
 			PropVariantClear(&prop);
@@ -558,7 +569,7 @@ int wpd_ptp_cmd_read(struct WpdStruct* wpd, void *data, int size) {
 
 	// Check if there is a data packet following this one (data phase)
 	int rc;
-	if (wpd->in_buffer_pos > bulk->length) {
+	if (wpd->in_buffer_pos > (int)bulk->length) {
 		int packet_size = wpd->in_buffer_pos - bulk->length;
 		if (packet_size < 12) {
 			mylog("data packet too small\n");

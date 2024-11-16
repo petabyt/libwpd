@@ -23,6 +23,11 @@ struct LibWPDPtpCommand {
 	int data_length;
 };
 
+struct LibWPDDescriptor {
+	int product_id;
+	int vendor_id;
+};
+
 /// @brief Initialize thread
 int wpd_init(int verbose, wchar_t *app_name);
 
@@ -38,7 +43,14 @@ struct WpdStruct *wpd_new();
 
 /// @brief Recieve an array of wide strings. Length is set in num_devices. Each string holds the device
 /// ID, similar to Linux /dev/bus/usb/001
+/// @note free with wpd_free_devices
 wchar_t **wpd_get_devices(struct WpdStruct *wpd, int *num_devices);
+
+/// @brief Parse USB vendor ID and product ID from path in list returned by wpd_get_devices
+int wpd_parse_io_path(const wchar_t *path, struct LibWPDDescriptor *d);
+
+/// @brief Free list of devices from wpd_get_devices
+void wpd_free_devices(struct WpdStruct *wpd, wchar_t **devs, int numDevices);
 
 /// @brief Initialize the WpdStruct with a new connection to the selected device ID wide string
 int wpd_open_device(struct WpdStruct *wpd, wchar_t *device_id);

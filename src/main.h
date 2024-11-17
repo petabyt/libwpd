@@ -18,6 +18,7 @@ struct WpdStruct {
 	IPortableDeviceValues *spResults;
 	IPortableDeviceValues *pDevValues;
 	IPortableDeviceValues *pClientInformation;
+	PWSTR device_path;
 
 	//int is_data_phase;
 

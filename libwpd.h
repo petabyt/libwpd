@@ -61,6 +61,10 @@ int wpd_close_device(struct WpdStruct* wpd);
 /// @brief Returns enum WPD_DEVICE_TYPES
 int wpd_get_device_type(struct WpdStruct *wpd);
 
+/// @brief Check if the device is attached
+/// @returns -1 if device is detached/not found, 0 if attached
+int wpd_check_connected(struct WpdStruct *wpd);
+
 /// @brief Generic USB writing command. Will store all sent data into a buffer, which will be processed when wpd_ptp_cmd_read is called.
 int wpd_ptp_cmd_write(struct WpdStruct *wpd, void *data, int size);
 

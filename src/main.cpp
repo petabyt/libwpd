@@ -115,12 +115,12 @@ int wpd_open_device(struct WpdStruct* wpd, PWSTR deviceId) {
 		return 1;
 	}
 
+	wpd->device_path = _wcsdup(deviceId);
+
 	LPCWSTR wszPnPDeviceID = deviceId;
 
 	HRESULT hr = S_OK;
-	IPortableDeviceValues* pClientInformation = NULL;
-
-	HRESULT ClientInfoHR = S_OK;
+	IPortableDeviceValues *pClientInformation = NULL;
 
 	hr = CoCreateInstance(
 		CLSID_PortableDeviceValues,
@@ -191,7 +191,7 @@ int wpd_open_device(struct WpdStruct* wpd, PWSTR deviceId) {
 	wpd->pClientInformation = pClientInformation;
 
 	// TODO:
-	HANDLE handle = CreateEvent(nullptr, false, false, nullptr);
+	//HANDLE handle = CreateEvent(nullptr, false, false, nullptr);
 
 	mylog("Opened device %ls\n", wszPnPDeviceID);
 
@@ -239,6 +239,21 @@ int wpd_get_device_type(struct WpdStruct* wpd) {
 	content->Release();
 
 	return (int)ti;
+}
+
+extern "C" __declspec(dllexport)
+int wpd_check_connected(struct WpdStruct *wpd) {
+	HANDLE h = CreateFileW(wpd->device_path,
+		GENERIC_READ | GENERIC_WRITE,
+		FILE_SHARE_READ | FILE_SHARE_WRITE,
+		NULL,
+		OPEN_EXISTING,
+		0,
+		NULL);
+	if (h == INVALID_HANDLE_VALUE) {
+		return -1;
+	}
+	return 0;
 }
 
 extern "C" __declspec(dllexport)

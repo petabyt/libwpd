@@ -95,6 +95,8 @@ int connect() {
 			printf("Done\n");
 		}
 
+		printf("Connection status %d\n", wpd_check_connected(wpd));
+
 		wpd_close_device(wpd);
 	}
 

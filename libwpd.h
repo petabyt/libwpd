@@ -68,9 +68,7 @@ int wpd_ptp_cmd_write(struct WpdStruct *wpd, void *data, int size);
 /// Every time this function is called, it will return data from the 'out' buffer, as requested by `size`.
 int wpd_ptp_cmd_read(struct WpdStruct *wpd, void *data, int size);
 
-
 // Manual old API:
-
 
 /// @brief Send command packet with no data packet, but expect data packet (device may not send data packet, that is fine)
 /// Data packet should be recieved with wpd_receive_do_data

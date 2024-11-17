@@ -17,6 +17,7 @@ test.exe: test.o libwpd_64.a
 
 install: libwpd_64.a
 	cp libwpd_64.a /usr/$(MINGW)/lib/libwpd.a
+	cp libwpd.h /usr/$(MINGW)/include
 
 $(FILES): windows/*.hpp
 

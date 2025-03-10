@@ -15,6 +15,7 @@
 #include <wpd_fills.hpp>
 #include <codecvt>
 #include <locale>
+#include <cstdint>
 #include "ptp.h"
 #include "main.h"
 

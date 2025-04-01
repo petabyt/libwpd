@@ -41,16 +41,25 @@ struct WpdStruct *wpd_new() {
 	wpd->pDevValues = NULL;
 	wpd->spResults = NULL;
 
+#define SIZE_50MB 50000000
+
 	wpd->in_buffer_pos = 0;
-	wpd->in_buffer = (uint8_t *)malloc(10000);
-	wpd->in_buffer_size = 10000;
+	wpd->in_buffer = (uint8_t *)malloc(SIZE_50MB);
+	wpd->in_buffer_size = SIZE_50MB;
 
 	wpd->out_buffer_pos = 0;
-	wpd->out_buffer = (uint8_t *)malloc(10000);
-	wpd->out_buffer_size = 10000;
+	wpd->out_buffer = (uint8_t *)malloc(SIZE_50MB);
+	wpd->out_buffer_size = SIZE_50MB;
 	wpd->out_buffer_filled = 0;
 
 	return wpd;
+}
+
+extern "C" __declspec(dllexport)
+void wpd_close(struct WpdStruct *wpd) {
+	free(wpd->in_buffer);
+	free(wpd->out_buffer);
+	free(wpd);
 }
 
 extern "C" __declspec(dllexport)
@@ -201,7 +210,7 @@ int wpd_open_device(struct WpdStruct* wpd, PWSTR deviceId) {
 
 extern "C" __declspec(dllexport)
 int wpd_close_device(struct WpdStruct* wpd) {
-	HRESULT hr;
+	HRESULT hr = 0;
 	if (wpd->pDevice != NULL) hr = wpd->pDevice->Close();
 	if (wpd->pDevValues != NULL) hr |= wpd->pDevValues->Clear();
 	if (wpd->spResults != NULL) hr |= wpd->spResults->Clear();
@@ -376,19 +385,20 @@ int send_finished_command(struct WpdStruct* wpd, struct PtpCommand* cmd, LPWSTR 
 		dwResponseCode = 0x2000;
 	}
 	mylog("Return code: 0x%x\n", dwResponseCode);
-	cmd->code = dwResponseCode;
+	cmd->code = (int)dwResponseCode;
 	return 0;
 }
 
 extern "C" __declspec(dllexport)
-int wpd_get_optimal_data_size(struct WpdStruct *wpd) {
+uint32_t wpd_get_optimal_data_size(struct WpdStruct *wpd) {
 	ULONG cbOptimalDataSize = 0;
 	HRESULT hr = wpd->spResults->GetUnsignedIntegerValue(WPD_PROPERTY_MTP_EXT_TRANSFER_TOTAL_DATA_SIZE,
 		&cbOptimalDataSize);
-
+	if (FAILED(hr)) {
+		mylog("Failed to get WPD_PROPERTY_MTP_EXT_TRANSFER_TOTAL_DATA_SIZE\n");
+	}
 	mylog("Optimal data size: %d\n", cbOptimalDataSize);
-
-	return (int)cbOptimalDataSize;	
+	return cbOptimalDataSize;
 }
 
 extern "C" __declspec(dllexport)
@@ -440,7 +450,7 @@ int wpd_receive_do_data(struct WpdStruct* wpd, struct PtpCommand* cmd, BYTE *buf
 }
 
 extern "C" __declspec(dllexport)
-int wpd_send_do_command(struct WpdStruct* wpd, struct PtpCommand* cmd, int length) {
+int wpd_send_do_command(struct WpdStruct* wpd, struct PtpCommand* cmd, uint32_t length) {
 	wpd->spResults = NULL;
 	HRESULT hr = wpd_prep_command(
 		wpd,
@@ -468,7 +478,7 @@ int wpd_send_do_command(struct WpdStruct* wpd, struct PtpCommand* cmd, int lengt
 }
 
 extern "C" __declspec(dllexport)
-int wpd_send_do_data(struct WpdStruct* wpd, struct PtpCommand* cmd, BYTE *buffer, int length) {
+int wpd_send_do_data(struct WpdStruct* wpd, struct PtpCommand* cmd, BYTE *buffer, uint32_t length) {
 	LPWSTR pwszContext = NULL;
 	wpd->spResults->GetStringValue(WPD_PROPERTY_MTP_EXT_TRANSFER_CONTEXT, &pwszContext);
 
@@ -515,11 +525,11 @@ int wpd_send_do_data(struct WpdStruct* wpd, struct PtpCommand* cmd, BYTE *buffer
 
 	CoTaskMemFree(pwszContext);
 
-	return cbBytesWritten;
+	return (int)cbBytesWritten;
 }
 
 extern "C" __declspec(dllexport)
-int wpd_ptp_cmd_write(struct WpdStruct *wpd, void *data, int size) {
+int wpd_ptp_cmd_write(struct WpdStruct *wpd, void *data, uint32_t size) {
 	mylog("Filling buffer +%d\n", size);
 	if (wpd->in_buffer_size - wpd->in_buffer_pos <= size) {
 		wpd->in_buffer = (uint8_t *)realloc(wpd->in_buffer, wpd->in_buffer_pos + size);
@@ -537,11 +547,11 @@ int wpd_ptp_cmd_write(struct WpdStruct *wpd, void *data, int size) {
 	wpd->out_buffer_filled = 0;
 	wpd->out_buffer_pos = 0;
 
-	return size;
+	return (int)size;
 }
 
 extern "C" __declspec(dllexport)
-int wpd_ptp_cmd_read(struct WpdStruct* wpd, void *data, int size) {
+int wpd_ptp_cmd_read(struct WpdStruct* wpd, void *data, uint32_t size) {
 	struct PtpCommand cmd;
 	struct PtpBulkContainer *bulk = (struct PtpBulkContainer *)(wpd->in_buffer);
 
@@ -578,15 +588,15 @@ int wpd_ptp_cmd_read(struct WpdStruct* wpd, void *data, int size) {
 	}
 
 	cmd.code = bulk->code;
-	cmd.param_length = (bulk->length - 12) / 4;
+	cmd.param_length = static_cast<int>((bulk->length - 12) / 4);
 	for (int i = 0; i < cmd.param_length; i++) {
 		cmd.params[i] = bulk->params[i];
 	}
 
 	// Check if there is a data packet following this one (data phase)
 	int rc;
-	if (wpd->in_buffer_pos > (int)bulk->length) {
-		int packet_size = wpd->in_buffer_pos - bulk->length;
+	if (wpd->in_buffer_pos > bulk->length) {
+		uint32_t packet_size = wpd->in_buffer_pos - bulk->length;
 		if (packet_size < 12) {
 			mylog("data packet too small\n");
 		}
@@ -623,14 +633,16 @@ int wpd_ptp_cmd_read(struct WpdStruct* wpd, void *data, int size) {
 		rc = wpd_receive_do_command(wpd, &cmd);
 		if (rc) return -3;
 
-		int payload_size = wpd_get_optimal_data_size(wpd);
+		uint32_t payload_size = wpd_get_optimal_data_size(wpd);
 		if (payload_size > wpd->out_buffer_size - 50) {
 			wpd->out_buffer = (uint8_t *)realloc(wpd->out_buffer, payload_size + 50);
 		}
 
 		// Receive the PTP response
-		payload_size = wpd_receive_do_data(wpd, &cmd, wpd->out_buffer + 12, wpd->out_buffer_size - 12); // TODO: Increase out buffer size
-		if (rc < 0) return -2;
+		payload_size = wpd_receive_do_data(wpd, &cmd, wpd->out_buffer + 12, wpd->out_buffer_size - 12);
+		if (payload_size == wpd->out_buffer_size - 12) {
+			mylog("wpd_receive_do_data filled buffer to max\n");
+		}
 
 		// Place data packet and cmd packet in the out buffer
 		struct PtpBulkContainer *out_cmd = (struct PtpBulkContainer *)(wpd->out_buffer);
@@ -667,5 +679,5 @@ int wpd_ptp_cmd_read(struct WpdStruct* wpd, void *data, int size) {
 	mylog("Sending %d\n", size);
 	memcpy(data, wpd->out_buffer + wpd->out_buffer_pos, size);
 	wpd->out_buffer_pos += size;
-	return size;
+	return (int)size;
 }

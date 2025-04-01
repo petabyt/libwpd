@@ -16,13 +16,6 @@ typedef enum tagWPD_DEVICE_TYPES {
 	WPD_DEVICE_TYPE_AUDIO_RECORDER                = 6
 }WPD_DEVICE_TYPES;
 
-struct LibWPDPtpCommand {
-	int code;
-	uint32_t params[5];
-	int param_length;
-	int data_length;
-};
-
 struct LibWPDDescriptor {
 	int product_id;
 	int vendor_id;
@@ -40,6 +33,9 @@ struct WpdStruct {
 
 /// @brief Create new WpdStruct object
 struct WpdStruct *wpd_new();
+
+/// @brief Frees all memory in the wpd struct and then frees the wpd struct itself
+void wpd_close(struct WpdStruct *wpd);
 
 /// @brief Recieve an array of wide strings. Length is set in num_devices. Each string holds the device
 /// ID, similar to Linux /dev/bus/usb/001
@@ -66,29 +62,11 @@ int wpd_get_device_type(struct WpdStruct *wpd);
 int wpd_check_connected(struct WpdStruct *wpd);
 
 /// @brief Generic USB writing command. Will store all sent data into a buffer, which will be processed when wpd_ptp_cmd_read is called.
-int wpd_ptp_cmd_write(struct WpdStruct *wpd, void *data, int size);
+int wpd_ptp_cmd_write(struct WpdStruct *wpd, void *data, uint32_t size);
 
 /// @brief Processes all PTP packets sent through wpd_ptp_cmd_write, and performs operations. Will then store all results in the 'out' buffer.
 /// Every time this function is called, it will return data from the 'out' buffer, as requested by `size`.
-int wpd_ptp_cmd_read(struct WpdStruct *wpd, void *data, int size);
-
-// Manual old API:
-
-/// @brief Send command packet with no data packet, but expect data packet (device may not send data packet, that is fine)
-/// Data packet should be recieved with wpd_receive_do_data
-int wpd_receive_do_command(struct WpdStruct *wpd, struct LibWPDPtpCommand *cmd);
-
-/// @brief Get data payload from device, if any.
-/// @note cmd struct will be filled with the response packet
-int wpd_receive_do_data(struct WpdStruct *wpd, struct LibWPDPtpCommand *cmd, uint8_t *buffer, int length);
-
-/// @brief Send command packet with data phase, with no data packet response from device. Call wpd_send_do_data to get the response 
-/// and data packets
-int wpd_send_do_command(struct WpdStruct* wpd, struct LibWPDPtpCommand* cmd, int length);
-
-/// @brief Send the actual data packet, if wpd_send_do_command was called with length != 0
-/// @note cmd struct will be filled with the response packet
-int wpd_send_do_data(struct WpdStruct* wpd, struct LibWPDPtpCommand* cmd, uint8_t *buffer, int length);
+int wpd_ptp_cmd_read(struct WpdStruct *wpd, void *data, uint32_t size);
 
 #endif
 

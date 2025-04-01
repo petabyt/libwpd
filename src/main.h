@@ -23,13 +23,13 @@ struct WpdStruct {
 	//int is_data_phase;
 
 	uint8_t *in_buffer;
-	int in_buffer_size;
-	int in_buffer_pos;
+	uint32_t in_buffer_size;
+	uint32_t in_buffer_pos;
 
 	uint8_t *out_buffer;
-	int out_buffer_size;
-	int out_buffer_pos;
-	int out_buffer_filled;
+	uint32_t out_buffer_size;
+	uint32_t out_buffer_pos;
+	uint32_t out_buffer_filled;
 };
 
 void mylog(const char* format, ...);

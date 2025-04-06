@@ -20,15 +20,17 @@ struct WpdStruct {
 	IPortableDeviceValues *pClientInformation;
 	PWSTR device_path;
 
-	//int is_data_phase;
-
+	/// @brief Data coming in from the client
 	uint8_t *in_buffer;
 	uint32_t in_buffer_size;
 	uint32_t in_buffer_pos;
 
+	/// @brief Data coming out of the camera
 	uint8_t *out_buffer;
 	uint32_t out_buffer_size;
+	/// @brief current reading position of out_buffer, incremented as wpd_ptp_cmd_read is called
 	uint32_t out_buffer_pos;
+	/// @brief Number of bytes of data written to out_buffer by the last transaction.
 	uint32_t out_buffer_filled;
 };
 

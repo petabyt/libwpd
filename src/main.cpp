@@ -25,7 +25,7 @@ static int verbose = 1;
 // Client name (current thread)
 static LPCWSTR client_name;
 
-void mylog(const char* format, ...) {
+void mylog(const char *format, ...) {
 	if (verbose == 0) return;
 	printf("libwpd: ");
 	va_list args;
@@ -41,15 +41,15 @@ struct WpdStruct *wpd_new() {
 	wpd->pDevValues = NULL;
 	wpd->spResults = NULL;
 
-#define SIZE_50MB 50000000
+	const uint32_t default_size = 10000;
 
 	wpd->in_buffer_pos = 0;
-	wpd->in_buffer = (uint8_t *)malloc(SIZE_50MB);
-	wpd->in_buffer_size = SIZE_50MB;
+	wpd->in_buffer = (uint8_t *)malloc(default_size);
+	wpd->in_buffer_size = default_size;
 
 	wpd->out_buffer_pos = 0;
-	wpd->out_buffer = (uint8_t *)malloc(SIZE_50MB);
-	wpd->out_buffer_size = SIZE_50MB;
+	wpd->out_buffer = (uint8_t *)malloc(default_size);
+	wpd->out_buffer_size = default_size;
 	wpd->out_buffer_filled = 0;
 
 	return wpd;
@@ -533,6 +533,7 @@ int wpd_ptp_cmd_write(struct WpdStruct *wpd, void *data, uint32_t size) {
 	mylog("Filling buffer +%d\n", size);
 	if (wpd->in_buffer_size - wpd->in_buffer_pos <= size) {
 		wpd->in_buffer = (uint8_t *)realloc(wpd->in_buffer, wpd->in_buffer_pos + size);
+		wpd->in_buffer_size = wpd->in_buffer_pos + size;
 		if (wpd->in_buffer == NULL) {
 			mylog("realloc(%d) failed", wpd->in_buffer_pos + size);
 			abort();
@@ -552,11 +553,11 @@ int wpd_ptp_cmd_write(struct WpdStruct *wpd, void *data, uint32_t size) {
 
 extern "C" __declspec(dllexport)
 int wpd_ptp_cmd_read(struct WpdStruct* wpd, void *data, uint32_t size) {
+	mylog("Request to send %d\n", size);
 	struct PtpCommand cmd;
 	struct PtpBulkContainer *bulk = (struct PtpBulkContainer *)(wpd->in_buffer);
 
-	// Return any leftover data first before trying the stored command
-	mylog("Request to send %d\n", size);
+	// If there is filled data left, return that before sending new commands
 	if ((wpd->out_buffer_filled - wpd->out_buffer_pos) > 0) {
 		goto end;
 	}
@@ -618,31 +619,29 @@ int wpd_ptp_cmd_read(struct WpdStruct* wpd, void *data, uint32_t size) {
 		if (rc < 0) return -1;
 
 		struct PtpBulkContainer *out_cmd = (struct PtpBulkContainer *)(wpd->out_buffer);
-		// TODO: Ensure out_buffer_size >= 12
+		if (wpd->out_buffer_size < 12) abort();
 		out_cmd->length = 12;
 		out_cmd->type = PTP_PACKET_TYPE_RESPONSE;
 		out_cmd->code = cmd.code;
 		out_cmd->transaction = bulk->transaction + 1; // we fake the transaction ID
-		// TODO: Fill response params
 		wpd->out_buffer_pos = 0;
 		wpd->out_buffer_filled = 12;
-		// (We don't expect a data response when sending data)
-		//goto end;
 	} else {
-		// Send a command packet, no data phase
+		// Send a command packet, no I->R data phase
 		rc = wpd_receive_do_command(wpd, &cmd);
 		if (rc) return -3;
 
 		uint32_t payload_size = wpd_get_optimal_data_size(wpd);
-		if (payload_size > wpd->out_buffer_size - 50) {
-			wpd->out_buffer = (uint8_t *)realloc(wpd->out_buffer, payload_size + 50);
+		const int max_packet_minus_payload_size = 12 + 12; // enough space for data and response packet
+		if (payload_size > (wpd->out_buffer_size - max_packet_minus_payload_size)) {
+			mylog("Resizing to %d\n", payload_size + max_packet_minus_payload_size);
+			wpd->out_buffer = (uint8_t *)realloc(wpd->out_buffer, payload_size + max_packet_minus_payload_size);
+			wpd->out_buffer_size = payload_size + max_packet_minus_payload_size;
+			if (wpd->out_buffer == NULL) abort();
 		}
 
 		// Receive the PTP response
-		payload_size = wpd_receive_do_data(wpd, &cmd, wpd->out_buffer + 12, wpd->out_buffer_size - 12);
-		if (payload_size == wpd->out_buffer_size - 12) {
-			mylog("wpd_receive_do_data filled buffer to max\n");
-		}
+		payload_size = wpd_receive_do_data(wpd, &cmd, wpd->out_buffer + 12, wpd->out_buffer_size - 12 - 12);
 
 		// Place data packet and cmd packet in the out buffer
 		struct PtpBulkContainer *out_cmd = (struct PtpBulkContainer *)(wpd->out_buffer);
@@ -652,7 +651,8 @@ int wpd_ptp_cmd_read(struct WpdStruct* wpd, void *data, uint32_t size) {
 		out_cmd->transaction = bulk->transaction + 1;
 		int length = 12 + payload_size;
 
-		struct PtpBulkContainer *resp = (struct PtpBulkContainer*)(wpd->out_buffer + 12 + payload_size);
+		// Place the response packet 12 bytes
+		struct PtpBulkContainer *resp = (struct PtpBulkContainer *)(wpd->out_buffer + length);
 		resp->length = 12;
 		resp->type = PTP_PACKET_TYPE_RESPONSE;
 		resp->code = cmd.code;

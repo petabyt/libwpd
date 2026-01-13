@@ -37,7 +37,7 @@ struct WpdStruct *wpd_new();
 /// @brief Frees all memory in the wpd struct and then frees the wpd struct itself
 void wpd_close(struct WpdStruct *wpd);
 
-/// @brief Recieve an array of wide strings. Length is set in num_devices. Each string holds the device
+/// @brief Receive an array of wide strings. Length is set in num_devices. Each string holds the device
 /// ID, similar to Linux /dev/bus/usb/001
 /// @note free with wpd_free_devices
 wchar_t **wpd_get_devices(struct WpdStruct *wpd, int *num_devices);

@@ -1,3 +1,4 @@
+// Extract vid/pid from win32 io path
 #include <stdio.h>
 #include <stdint.h>
 #include <wctype.h>

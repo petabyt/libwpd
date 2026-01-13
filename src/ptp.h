@@ -1,3 +1,6 @@
+#pragma once
+#include <stdint.h>
+
 #define PTP_OC_OpenSession			0x1002
 #define PTP_OC_CloseSession			0x1003
 
@@ -10,10 +13,8 @@
 #define PTP_PACKET_TYPE_RESPONSE	0x3
 #define PTP_PACKET_TYPE_EVENT		0x4
 
-#pragma pack(push, 1)
-
 // Standard USB-only packet
-struct PtpBulkContainer {
+struct __attribute__((packed)) PtpBulkContainer {
 	uint32_t length; // length of packet, in bytes
 	uint16_t type; // See PACKET_TYPE_*
 	uint16_t code; // See PTP_OC_*
@@ -25,5 +26,3 @@ struct PtpBulkContainer {
 
 	// Payload data follows, if any
 };
-
-#pragma pack(pop)
